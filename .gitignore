@@ -1,0 +1,7 @@
+# Environment files (contain secrets — never commit)
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
