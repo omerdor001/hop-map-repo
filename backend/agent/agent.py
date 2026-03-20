@@ -106,9 +106,22 @@ _configure_tesseract()
 # ---------------------------------------------------------------------------
 
 BACKEND_URL   = agent_config.backend_url
-CHILD_ID      = agent_config.child_id
+CHILD_ID: str = ""   # assigned by the server on startup
 SCAN_INTERVAL = agent_config.scan_interval_seconds
 CONTEXT_LINES = agent_config.context_lines
+
+
+def _register_child() -> str:
+    """POST to the server and return the server-assigned child ID."""
+    try:
+        resp = requests.post(f"{BACKEND_URL}/api/children", json={}, timeout=5)
+        resp.raise_for_status()
+        assigned = resp.json()["childId"]
+        log.info("Server assigned child ID %r.", assigned)
+        return assigned
+    except requests.exceptions.RequestException as exc:
+        log.warning("Could not reach server for registration: %s", exc)
+        return "child-unknown"
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -957,17 +970,9 @@ def run() -> None:
         log.error("SetWinEventHook failed — aborting.")
         return
 
-    # Register this child with the server so it appears on the dashboard
-    # immediately, even before any hop is detected.
-    try:
-        requests.post(
-            f"{BACKEND_URL}/api/children",
-            json={"childId": CHILD_ID, "childName": CHILD_ID},
-            timeout=5,
-        )
-        log.info("Registered as child %r on server.", CHILD_ID)
-    except requests.exceptions.RequestException as exc:
-        log.warning("Could not register child with server: %s", exc)
+    # Register with the server; use the ID it returns (may be server-generated).
+    global CHILD_ID
+    CHILD_ID = _register_child()
 
     log.info(
         "HopMap agent running. Current app: %s. Press Ctrl-C to stop.",

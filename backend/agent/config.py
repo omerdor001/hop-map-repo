@@ -20,9 +20,6 @@ class AgentConfig:
     # Where the HopMap server is running
     backend_url: str = os.getenv("BACKEND_URL", "http://localhost:8000")
 
-    # Identifier for this child — must match the childId the parent watches
-    child_id: str = os.getenv("CHILD_ID", "child1")
-
     # Ollama model used to decide whether a detected link is a hop attempt
     ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
