@@ -39,6 +39,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
@@ -373,7 +374,7 @@ def list_children() -> dict:
 
 
 class RegisterChildRequest(BaseModel):
-    child_id:   str = Field(..., alias="childId")
+    child_id:   Optional[str] = Field(None, alias="childId")
     child_name: str = Field("", alias="childName")
 
     model_config = {"populate_by_name": True}
@@ -381,11 +382,17 @@ class RegisterChildRequest(BaseModel):
 
 @app.post("/api/children")
 def register_child(body: RegisterChildRequest) -> dict:
-    """Register a child on first connection (never overwrites an existing name)."""
-    name = body.child_name.strip() or body.child_id
-    db.register_child(body.child_id, name)
-    log.info("Child registered  id=%r  name=%r", body.child_id, name)
-    return {"ok": True, "childId": body.child_id, "childName": name}
+    """Register a child on first connection (never overwrites an existing name).
+
+    If *childId* is omitted the server generates a unique UUID and returns it.
+    The agent should persist the returned childId locally so the same ID is
+    reused across restarts.
+    """
+    child_id = (body.child_id or "").strip() or str(uuid.uuid4())
+    name = body.child_name.strip() or child_id
+    db.register_child(child_id, name)
+    log.info("Child registered  id=%r  name=%r", child_id, name)
+    return {"ok": True, "childId": child_id, "childName": name}
 
 
 class RenameChildRequest(BaseModel):
