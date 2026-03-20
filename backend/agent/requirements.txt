@@ -1,0 +1,18 @@
+# HopMap Agent dependencies
+# Run on the kid's Windows PC
+# Install: pip install -r requirements.txt
+#
+# Also requires Tesseract OCR engine:
+#   Windows: https://github.com/UB-Mannheim/tesseract/wiki
+#   Default install path: C:\Program Files\Tesseract-OCR\tesseract.exe
+
+pywin32>=306
+psutil>=5.9.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+# Screen capture + OCR
+mss>=9.0.0
+pytesseract>=0.3.13
+Pillow>=10.0.0
+# Clipboard monitoring
+pyperclip>=1.9.0

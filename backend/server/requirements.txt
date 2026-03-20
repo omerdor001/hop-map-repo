@@ -1,0 +1,8 @@
+# HopMap Server dependencies
+# Run on the machine hosting the FastAPI backend + dashboard
+# Install: pip install -r requirements-server.txt
+
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pymongo[srv]>=4.6.0
+python-dotenv>=1.0.0
