@@ -4,10 +4,9 @@ import { useNavigate, useLocation } from "react-router-dom"
 const sideNav = [
   { section: "MONITOR", items: [
     { icon: "🗺️", label: "Live Map", path: "/", badge: null },
-    { icon: "⚠️", label: "Alerts", path: "/alerts", badge: null },
   ]},
   { section: "ACCOUNT", items: [
-    { icon: "⚙️", label: "Settings", path: "/settings", badge: null },
+    { icon: "👦", label: "Kids", path: "/kids", badge: null },
   ]},
 ]
 
