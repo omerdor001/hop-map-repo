@@ -1,3 +1,31 @@
+/* ── Box model reset ─────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2d38; border-radius: 2px; }
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes ping {
+  0%   { transform: scale(1);   opacity: 0.7; }
+  70%  { transform: scale(2.2); opacity: 0;   }
+  100% { transform: scale(1);   opacity: 0;   }
+}
+
+@keyframes in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* ── Event row hover ─────────────────────────────────────────────────────── */
+.ev-row:hover {
+  background: rgba(255, 255, 255, 0.03) !important;
+  cursor: pointer;
+}
+
 :root {
   --text: #6b6375;
   --text-h: #08060d;

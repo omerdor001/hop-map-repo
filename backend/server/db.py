@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 from pymongo import MongoClient, DESCENDING
 from pymongo.collection import Collection
@@ -108,7 +109,6 @@ def clear_events(child_id: str) -> int:
 
 def register_child(child_id: str, child_name: str) -> None:
     """Insert a child record only if it doesn't exist yet. Never overwrites the stored name."""
-    from datetime import datetime, timezone
     _col_children().update_one(
         {"childId": child_id},
         {"$setOnInsert": {
@@ -138,6 +138,4 @@ def get_children() -> list[dict]:
     for cid in _col_events().distinct("childId"):
         registered.setdefault(cid, cid)
     return [{"childId": cid, "childName": name} for cid, name in sorted(registered.items())]
-
-
 

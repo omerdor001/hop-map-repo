@@ -314,7 +314,6 @@ async def agent_hop(child_id: str, request: Request) -> dict:
 
 @app.get("/stream/{child_id}")
 async def stream(child_id: str, request: Request) -> StreamingResponse:
-    _validate_child_id(child_id)
     """
     Parent dashboard connects here via EventSource.
 
@@ -323,6 +322,7 @@ async def stream(child_id: str, request: Request) -> StreamingResponse:
     Thereafter: streams live events as they arrive.
     Auto-reconnects for free — the browser's EventSource handles it.
     """
+    _validate_child_id(child_id)
     q: asyncio.Queue = asyncio.Queue()
     _sse_queues.setdefault(child_id, []).append(q)
     log.info("Dashboard SSE connected  child=%r", child_id)
@@ -374,7 +374,7 @@ def health() -> dict:
 @app.get("/api/events/{child_id}")
 def get_events(child_id: str, limit: int = 100) -> dict:
     _validate_child_id(child_id)
-    events = db.get_events(child_id)[: min(limit, 500)]
+    events = db.get_events(child_id)[: max(1, min(limit, 500))]
     return {"childId": child_id, "events": events, "count": len(events)}
 
 
@@ -488,7 +488,7 @@ async def seed_demo() -> dict:
             "to":                 hop["to"],
             "fromTitle":          hop["fromTitle"],
             "toTitle":            hop["toTitle"],
-            "timestamp":          base_time + i * 240,
+            "timestamp":          datetime.fromtimestamp(base_time + i * 240, tz=timezone.utc).isoformat(),
             "blocked":            False,
             "alert":              hop.get("alertReason") is not None,
             "alertReason":        hop.get("alertReason"),

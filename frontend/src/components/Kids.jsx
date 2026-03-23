@@ -1,4 +1,10 @@
 import { useState, useEffect } from "react"
+import { getInitials } from "../utils/eventHelpers"
+
+const card = {
+  background: "#16161a", border: "1px solid #1e1e24", borderRadius: 12,
+  padding: "20px 24px", display: "flex", alignItems: "center", gap: 16,
+}
 
 export default function Kids({ setChildList }) {
   const [children, setChildren]   = useState([])
@@ -43,11 +49,6 @@ export default function Kids({ setChildList }) {
     }
   }
 
-  const card = {
-    background: "#16161a", border: "1px solid #1e1e24", borderRadius: 12,
-    padding: "20px 24px", display: "flex", alignItems: "center", gap: 16,
-  }
-
   return (
     <div style={{ padding: "40px 48px", maxWidth: 700 }}>
       {/* Header */}
@@ -79,7 +80,7 @@ export default function Kids({ setChildList }) {
                   display: "flex", alignItems: "center", justifyContent: "center",
                   fontSize: 15, fontWeight: 700, color: "#fff",
                 }}>
-                  {child.childName[0].toUpperCase()}
+                  {getInitials(child.childName)}
                 </div>
 
                 {/* Name / input */}
