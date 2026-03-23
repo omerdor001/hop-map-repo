@@ -1,65 +1,13 @@
 import { useState, useEffect, useMemo } from "react"
-
-const AVATAR_GRADS = [
-  "linear-gradient(135deg,#6366f1,#8b5cf6)",
-  "linear-gradient(135deg,#f43f5e,#fb7185)",
-  "linear-gradient(135deg,#0ea5e9,#38bdf8)",
-  "linear-gradient(135deg,#10b981,#34d399)",
-  "linear-gradient(135deg,#f59e0b,#fbbf24)",
-]
-
-function getAppIcon(to) {
-  if (!to) return { icon: "📱", bg: "#1a1d28" }
-  const t = to.toLowerCase()
-  if (t.includes("roblox"))                                          return { icon: "🎮", bg: "#3B2D8C" }
-  if (t.includes("minecraft") || t.includes("javaw"))               return { icon: "⛏",  bg: "#2D4A1E" }
-  if (t.includes("fortnite"))                                        return { icon: "🎯", bg: "#1A3A5C" }
-  if (t.includes("youtube"))                                         return { icon: "▶",  bg: "#8B1A1A" }
-  if (t.includes("discord"))                                         return { icon: "💬", bg: "#2D2060" }
-  if (t.includes("telegram"))                                        return { icon: "✈️", bg: "#1A4A5C" }
-  if (t.includes("whatsapp"))                                        return { icon: "💚", bg: "#1A3A2A" }
-  if (t.includes("instagram"))                                       return { icon: "📸", bg: "#4A1A3A" }
-  if (t.includes("tiktok"))                                          return { icon: "🎵", bg: "#1A1A2A" }
-  if (t.includes("steam"))                                           return { icon: "🎮", bg: "#1A2D3A" }
-  if (t.includes("chrome") || t.includes("msedge") ||
-      t.includes("firefox") || t.includes("brave"))                 return { icon: "🌐", bg: "#1A3A5C" }
-  if (t.startsWith("http"))                                          return { icon: "🌐", bg: "#1A3A5C" }
-  return { icon: "📱", bg: "#1a1d28" }
-}
-
-function getEventTitle(event) {
-  return `HOP DETECTED — ${event.toTitle || event.to || "external link"}`
-}
-
-function getEventDesc(event) {
-  if (event.classifyReason && event.classifyReason !== "server_unreachable") return event.classifyReason
-  if (event.context) return String(event.context).replace(/^\[clipboard\] /, "")
-  if (event.from)    return `${event.from} → ${event.to || "—"}`
-  return "Confirmed hop detected"
-}
-
-function todayDefault() {
-  const d  = new Date()
-  const dd = String(d.getDate()).padStart(2, "0")
-  const mm = String(d.getMonth() + 1).padStart(2, "0")
-  return `${dd}/${mm}/${d.getFullYear()}`
-}
-
-function getInitials(name) {
-  if (!name) return "??"
-  const parts = name.trim().split(/\s+/)
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
-  return name.slice(0, 2).toUpperCase()
-}
-
-function Dot({ color, pulse }) {
-  return (
-    <span style={{ position:"relative", display:"inline-flex", width:9, height:9, flexShrink:0 }}>
-      {pulse && <span style={{ position:"absolute", inset:0, borderRadius:"50%", background:color, animation:"ping 1.8s ease-out infinite", opacity:0.7 }} />}
-      <span style={{ position:"absolute", inset:1, borderRadius:"50%", background:color }} />
-    </span>
-  )
-}
+import {
+  AVATAR_GRADS,
+  getInitials,
+  getAppIcon,
+  getEventDesc,
+  getEventTitle,
+  todayDefault,
+  Dot,
+} from "../utils/eventHelpers"
 
 export default function Homepage({ childList, activeId, setActiveId }) {
   const [time, setTime]             = useState(new Date())
@@ -182,15 +130,6 @@ export default function Homepage({ childList, activeId, setActiveId }) {
   return (
     <div style={{ width:"100%", height:"100vh", background:"#0d0f14", color:"#e8eaf0",
       fontFamily:"'IBM Plex Sans',sans-serif", display:"flex", flexDirection:"column", overflow:"hidden" }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0;}
-        @keyframes ping{0%{transform:scale(1);opacity:.7}70%{transform:scale(2.2);opacity:0}100%{transform:scale(1);opacity:0}}
-        @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-        .ev-row:hover{background:rgba(255,255,255,0.03)!important;cursor:pointer;}
-        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#2a2d38;border-radius:2px}
-      `}</style>
-
       <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
         <div style={{ flex:1, padding:"16px 24px", display:"flex", flexDirection:"column", gap:13, overflow:"hidden" }}>
 
@@ -324,12 +263,12 @@ export default function Homepage({ childList, activeId, setActiveId }) {
             ) : filteredEvents.map((ev, i) => {
               const { icon, bg: iconBg } = getAppIcon(ev.to)
               const title  = getEventTitle(ev)
-              const desc   = getEventDesc(ev)
+              const desc   = getEventDesc(ev, "Confirmed hop detected")
               const evTime = ev.timestamp
                 ? new Date(ev.timestamp).toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" })
                 : "—"
               return (
-                <div key={ev._id || i} className="ev-row" style={{
+                <div key={ev.receivedAt || `${ev.timestamp}-${i}`} className="ev-row" style={{
                   display:"flex", alignItems:"center", gap:11, padding:"10px 15px",
                   borderBottom: i < filteredEvents.length - 1 ? "1px solid #1a1d28" : "none",
                   background:"rgba(255,71,87,0.04)", transition:"background 0.15s",

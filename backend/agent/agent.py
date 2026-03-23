@@ -28,8 +28,9 @@ Detection pipeline
              are re-evaluated after the TTL expires) triggers a POST to
              /agent/classify on the HopMap server.  The server runs the LLM and
              returns { decision, confidence, reason }.
-             If the server is unreachable the agent falls back to a local Ollama
-             model so detection is never fully blind during a network outage.
+             If the server is unreachable the URL is treated as safe and skipped,
+             preventing false positives at the cost of missed detections during
+             network outages.
 
   Layer 5 — When the server (or fallback) flags a hop attempt the lure is
              parked in a per-URL pending store.  On the next app-switch away
@@ -60,6 +61,7 @@ import logging
 import pathlib
 import queue
 import re
+import shutil
 import threading
 import time
 from collections import OrderedDict
@@ -88,9 +90,6 @@ _TESSERACT_DEFAULT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 def _configure_tesseract() -> None:
     """Point pytesseract at the Tesseract binary if it is not already on PATH."""
-    import pathlib
-    import shutil
-
     current = pytesseract.pytesseract.tesseract_cmd
     if current and current != "tesseract":
         return  # already configured explicitly
@@ -894,8 +893,6 @@ def _process_foreground_change(hwnd: int) -> None:
             else:
                 for pending in snapshot.values():
                     _confirm_pending(pending, proc, title, hwnd)
-    else:
-        pass  # transit process — ignore
 
     # ------------------------------------------------------------------
     # Record this switch so _try_late_confirm can replay it if a lure
