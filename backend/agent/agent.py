@@ -57,6 +57,7 @@ import ctypes
 import ctypes.wintypes
 import json
 import logging
+import pathlib
 import queue
 import re
 import threading
@@ -110,14 +111,47 @@ CHILD_ID: str = ""   # assigned by the server on startup
 SCAN_INTERVAL = agent_config.scan_interval_seconds
 CONTEXT_LINES = agent_config.context_lines
 
+# File where the server-assigned child ID is persisted so the same record is
+# reused across agent restarts rather than creating a new orphaned profile.
+_CHILD_ID_FILE = pathlib.Path(__file__).parent / ".child_id"
+
 
 def _register_child() -> str:
-    """POST to the server and return the server-assigned child ID."""
+    """Return the persisted child ID, registering with the server if needed.
+
+    The ID is written to *_CHILD_ID_FILE* so the same child record survives
+    agent restarts — event history remains intact in the parent dashboard.
+    """
+    # ── Load a previously persisted ID ───────────────────────────────────
+    try:
+        if _CHILD_ID_FILE.exists():
+            stored = _CHILD_ID_FILE.read_text(encoding="utf-8").strip()
+            if stored:
+                log.info("Using persisted child ID %r.", stored)
+                # Notify the server we are back online; it ignores the call if
+                # the child is already registered (upsert with $setOnInsert).
+                try:
+                    requests.post(
+                        f"{BACKEND_URL}/api/children",
+                        json={"childId": stored},
+                        timeout=5,
+                    )
+                except requests.exceptions.RequestException:
+                    pass  # offline — that's OK, we still know our ID
+                return stored
+    except OSError:
+        pass
+
+    # ── Register fresh with the server ───────────────────────────────────
     try:
         resp = requests.post(f"{BACKEND_URL}/api/children", json={}, timeout=5)
         resp.raise_for_status()
         assigned = resp.json()["childId"]
         log.info("Server assigned child ID %r.", assigned)
+        try:
+            _CHILD_ID_FILE.write_text(assigned, encoding="utf-8")
+        except OSError as exc:
+            log.warning("Could not persist child ID to disk: %s", exc)
         return assigned
     except requests.exceptions.RequestException as exc:
         log.warning("Could not reach server for registration: %s", exc)
