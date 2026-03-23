@@ -100,6 +100,12 @@ def get_events(child_id: str) -> list[dict]:
     return list(cursor)
 
 
+def clear_events(child_id: str) -> int:
+    """Delete all hop events for a child. Returns the number of deleted documents."""
+    result = _col_events().delete_many({"childId": child_id})
+    return result.deleted_count
+
+
 def register_child(child_id: str, child_name: str) -> None:
     """Insert a child record only if it doesn't exist yet. Never overwrites the stored name."""
     from datetime import datetime, timezone

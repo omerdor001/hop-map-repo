@@ -36,6 +36,11 @@ class ServerConfig:
     # Ollama model used server-side to classify hop attempts
     ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
+    # LLM provider backend.  Currently supported: "ollama"
+    # Switch by setting LLM_PROVIDER=<name> in .env once a new provider is
+    # added to backend/server/llm/__init__.py.
+    llm_provider: str = os.getenv("LLM_PROVIDER", "ollama")
+
     # CORS — comma-separated list of allowed origins, or "*" for all
     # Example: "http://localhost:5173,https://hopmap.vercel.app"
     cors_origins: list[str] = field(default_factory=lambda: (

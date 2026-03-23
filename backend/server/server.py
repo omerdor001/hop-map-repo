@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -44,7 +45,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
-import ollama
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,6 +53,7 @@ from pydantic import BaseModel, Field
 
 import db
 from config import server_config
+from llm import LLMProvider, get_provider
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -98,6 +99,32 @@ app.add_middleware(
 _sse_queues: dict[str, list[asyncio.Queue]] = {}
 _SSE_SHUTDOWN = object()  # sentinel injected into queues on server shutdown
 
+# Whether demo/seeding endpoints are exposed (set DEMO_MODE=true in .env)
+_DEMO_MODE: bool = os.getenv("DEMO_MODE", "false").lower() == "true"
+
+# ---------------------------------------------------------------------------
+# LLM provider singleton
+# ---------------------------------------------------------------------------
+# Created once at startup from the LLM_PROVIDER + OLLAMA_MODEL env-vars.
+# To swap providers, change LLM_PROVIDER in .env — no code changes needed.
+
+_llm: LLMProvider = get_provider(
+    name=server_config.llm_provider,
+    model=server_config.ollama_model,
+)
+
+# ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+
+_CHILD_ID_RE = re.compile(r'^[a-zA-Z0-9_\-]{1,64}$')
+
+
+def _validate_child_id(child_id: str) -> None:
+    """Raise HTTP 400 if *child_id* contains invalid characters."""
+    if not _CHILD_ID_RE.match(child_id):
+        raise HTTPException(status_code=400, detail="Invalid childId format.")
+
 
 async def _broadcast(child_id: str, payload: dict) -> None:
     """Push *payload* to every SSE queue registered for *child_id*."""
@@ -115,22 +142,23 @@ _CLASSIFY_SYSTEM_PROMPT = """\
 You are a child-safety monitor reviewing in-game chat messages for predatory behavior, hate speech, and inappropriate content.
 
 Reply YES if the message contains ANY of the following:
- - OFF-PLATFORMING: Links/handles for Discord, Telegram, Snap, Insta, etc., or requests to "move to DMs" or "voice chat elsewhere."
- - HATE SPEECH/ANTISEMITISM: Any slur, dehumanizing language, or tropes targeting Jewish people, or any other protected group (race, religion, identity).
- - SEXUAL CONTENT: Explicit language, requests for "ERP" (Erotic Roleplay), sexualized comments about avatars, or requests for "pics."
- - GROOMING/INTRUSIVE QUESTIONS: Asking for age, real-world location (city/school), or "are your parents home?"
+ - OFF-PLATFORMING: Links or handles for Discord, Telegram, Snap, Instagram, WhatsApp, TikTok, etc.; requests to "move to DMs", "friend me on Discord", "join my server", "add me on [platform]", or "voice chat elsewhere."
+ - FREE-ITEM LURE: Promises of free Robux, skins, items, or in-game currency contingent on joining an external platform or clicking a link.
+ - HATE SPEECH / ANTISEMITISM: Any slur, dehumanizing language, or tropes targeting Jewish people or any other protected group (race, religion, gender, identity).
+ - SEXUAL CONTENT: Explicit language, requests for ERP (Erotic Roleplay), sexualized comments about avatars, or requests for photos.
+ - GROOMING / INTRUSIVE QUESTIONS: Asking for age, real-world location (city, school, country), phone number, or whether the child is alone at home.
 
 Reply NO if:
- - The link is an official game resource (wiki, patch notes).
- - The chat is strictly about gameplay, strategy, or trading items.
- - The language is competitive but not hateful or predatory.
+ - The link is an official game resource (wiki, patch notes, Roblox Help Center, Minecraft.net, Steam store page).
+ - The chat is strictly about gameplay, strategy, or in-game item trading with no external-platform element.
+ - The language is competitive (trash talk) but contains no slurs and no predatory intent.
 
- Respond with a JSON object ONLY — no markdown fences, no explanation.
+Respond with a JSON object ONLY — no markdown, no explanation, no extra text.
 Schema:
 {
   "decision":   "YES" or "NO",
   "confidence": integer 0-100,
-  "reason":     "one short phrase (max 10 words, can be a few reasons from the list above)"
+  "reason":     "one short phrase describing the violation (max 10 words)"
 }
 """
 
@@ -146,44 +174,28 @@ async def _check_classify_rate_limit(child_id: str) -> bool:
     """Return True if the request is within the allowed rate, False otherwise."""
     now = time.monotonic()
     async with _classify_rate_lock:
-        window = _classify_call_times.setdefault(child_id, [])
-        # Evict timestamps older than 60 s.
-        _classify_call_times[child_id] = [t for t in window if now - t < 60.0]
-        if len(_classify_call_times[child_id]) >= _CLASSIFY_MAX_RPM:
+        # Rebuild the window, evicting timestamps older than 60 s.  Storing
+        # only the trimmed list prevents the dict from growing unbounded.
+        recent = [t for t in _classify_call_times.get(child_id, []) if now - t < 60.0]
+        if len(recent) >= _CLASSIFY_MAX_RPM:
+            _classify_call_times[child_id] = recent
             return False
-        _classify_call_times[child_id].append(now)
+        recent.append(now)
+        _classify_call_times[child_id] = recent
         return True
 
 
-def _run_ollama_classify(context: str) -> dict:
-    """Run Ollama synchronously and return a parsed result dict.
+def _run_llm_classify(context: str) -> dict:
+    """Delegate inference to the configured LLM provider (synchronous).
 
     Intended to be called via asyncio.to_thread so the event loop is never
     blocked during inference.
 
     Raises:
         json.JSONDecodeError: if the model response cannot be parsed as JSON.
-        Exception:            for any Ollama / network failure.
+        Exception:           for any provider-level failure (network, auth, etc.).
     """
-    response = ollama.chat(
-        model=server_config.ollama_model,
-        messages=[
-            {"role": "system", "content": _CLASSIFY_SYSTEM_PROMPT},
-            {"role": "user",   "content": context},
-        ],
-        options={"temperature": 0},
-    )
-    raw = response["message"]["content"].strip()
-    # Strip markdown code fences that some model versions emit despite the
-    # explicit instruction not to.
-    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.MULTILINE).strip()
-
-    data = json.loads(raw)
-    return {
-        "decision":   str(data.get("decision", "NO")).upper(),
-        "confidence": max(0, min(100, int(data.get("confidence", 50)))),
-        "reason":     str(data.get("reason", "")).strip(),
-    }
+    return _llm.classify(context, _CLASSIFY_SYSTEM_PROMPT)
 
 
 class ClassifyRequest(BaseModel):
@@ -204,17 +216,17 @@ class ClassifyResponse(BaseModel):
 
 @app.post("/agent/classify", response_model=ClassifyResponse)
 async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
-    """Classify a URL + context snippet with the server-side LLM.
+    """Classify a URL + context snippet with the configured LLM provider.
 
     Called by the desktop agent for every new URL it detects.  The agent sends
     only a few lines of chat context so the payload is small.  Inference is the
-    dominant latency — typically 1–4 s on a modern CPU-only server with a 7B
-    model, or sub-second on a GPU.
+    dominant latency — typically 1–4 s on a CPU with a 7B model.
 
     Returns HTTP 429 if the per-child rate limit is exceeded.
     Returns decision="NO", confidence=0 on any inference error so the agent
     treats the result as a non-event rather than a false positive.
     """
+    _validate_child_id(body.child_id)
     if not await _check_classify_rate_limit(body.child_id):
         log.warning(
             "Classify rate limit hit  child=%r — rejecting.", body.child_id
@@ -230,14 +242,14 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
     )
 
     try:
-        result = await asyncio.to_thread(_run_ollama_classify, body.context)
+        result = await asyncio.to_thread(_run_llm_classify, body.context)
     except json.JSONDecodeError as exc:
         log.warning(
-            "Ollama returned non-JSON for child %r: %s", body.child_id, exc
+            "LLM returned non-JSON for child %r: %s", body.child_id, exc
         )
         return ClassifyResponse(decision="NO", confidence=0, reason="parse_error")
     except Exception as exc:
-        log.warning("Ollama error for child %r: %s", body.child_id, exc)
+        log.warning("LLM error for child %r: %s", body.child_id, exc)
         return ClassifyResponse(decision="NO", confidence=0, reason="inference_error")
 
     log.info(
@@ -254,6 +266,7 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
 @app.post("/agent/hop/{child_id}")
 async def agent_hop(child_id: str, request: Request) -> dict:
     """Desktop agent POSTs app-switch events here."""
+    _validate_child_id(child_id)
     body = await request.json()
 
     alert_reason: Optional[str] = (
@@ -301,6 +314,7 @@ async def agent_hop(child_id: str, request: Request) -> dict:
 
 @app.get("/stream/{child_id}")
 async def stream(child_id: str, request: Request) -> StreamingResponse:
+    _validate_child_id(child_id)
     """
     Parent dashboard connects here via EventSource.
 
@@ -359,8 +373,18 @@ def health() -> dict:
 
 @app.get("/api/events/{child_id}")
 def get_events(child_id: str, limit: int = 100) -> dict:
+    _validate_child_id(child_id)
     events = db.get_events(child_id)[: min(limit, 500)]
     return {"childId": child_id, "events": events, "count": len(events)}
+
+
+@app.delete("/api/events/{child_id}")
+def clear_events(child_id: str) -> dict:
+    """Delete all stored hop events for a child (parent dashboard clear-history)."""
+    _validate_child_id(child_id)
+    deleted = db.clear_events(child_id)
+    log.info("Events cleared  child=%r  count=%d", child_id, deleted)
+    return {"ok": True, "childId": child_id, "deleted": deleted}
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +427,7 @@ class RenameChildRequest(BaseModel):
 @app.patch("/api/children/{child_id}")
 def rename_child(child_id: str, body: RenameChildRequest) -> dict:
     """Rename an existing child (called from the Kids management page)."""
+    _validate_child_id(child_id)
     name = body.child_name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="childName must not be empty")
@@ -419,8 +444,11 @@ def rename_child(child_id: str, body: RenameChildRequest) -> dict:
 async def seed_demo() -> dict:
     """Inject a pre-baked demo session for childId='demo'.
 
-    Useful for live demonstrations and UI development.
+    Only available when DEMO_MODE=true is set in the server environment.
+    Disabled by default to prevent accidental data pollution in production.
     """
+    if not _DEMO_MODE:
+        raise HTTPException(status_code=404, detail="Not found.")
     base_time = time.time() - 1200  # events spread over the last 20 minutes
 
     demo_hops = [
