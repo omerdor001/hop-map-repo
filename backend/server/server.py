@@ -56,6 +56,128 @@ from config import server_config
 from llm import LLMProvider, get_provider
 
 # ---------------------------------------------------------------------------
+# Nasty Words Database (Excel-based word blocking)
+# ---------------------------------------------------------------------------
+# Load blocked words from an Excel file to avoid unnecessary LLM calls.
+# The Excel file should have a column named "word" containing the blocked terms.
+# Set WORDS_DB_PATH in .env to point to your Excel file.
+
+# Global set to store blocked words (loaded once at startup)
+_blocked_words: set[str] = set()
+
+
+def _load_blocked_words() -> None:
+    """
+    Load blocked words from the Excel file specified in WORDS_DB_PATH.
+    Called once during server startup. Words are stored in a set for O(1) lookup.
+
+    Expected Excel format:
+        - File: any .xlsx workbook
+        - Column: "word" (case-insensitive, words will be normalized to lowercase)
+
+    If WORDS_DB_PATH is empty or file not found, the set remains empty
+    and all classification falls through to LLM.
+    """
+    global _blocked_words
+
+    # Get the path from config (set via WORDS_DB_PATH env var)
+    excel_path = server_config.words_db_path
+
+    # If no path configured, skip loading
+    if not excel_path:
+        log.info("WORDS_DB_PATH not configured - word blocking disabled")
+        return
+
+    # Check if file exists
+    if not os.path.exists(excel_path):
+        log.warning("Words database file not found: %s", excel_path)
+        return
+
+    try:
+        # Import openpyxl here to make it optional (only needed if using word blocking)
+        import openpyxl
+
+        # Load the Excel workbook
+        workbook = openpyxl.load_workbook(excel_path, read_only=True)
+        worksheet = workbook.active
+
+        # Find the "word" column (header row)
+        word_col_idx = None
+        headers = []
+
+        # Read first row to find headers
+        for cell in worksheet[1]:
+            headers.append(cell.value)
+            if cell.value and str(cell.value).strip().lower() == "word":
+                word_col_idx = cell.column - 1  # Convert to 0-indexed
+                break
+
+        if word_col_idx is None:
+            log.warning(
+                "Excel file '%s' has no 'word' column - word blocking disabled",
+                excel_path,
+            )
+            workbook.close()
+            return
+
+        # Load all words from the column (skip header)
+        words = set()
+        for row in worksheet.iter_rows(min_row=2, values_only=True):
+            if row and row[word_col_idx]:
+                word = str(row[word_col_idx]).strip().lower()
+                if word:  # Only add non-empty words
+                    words.add(word)
+
+        workbook.close()
+
+        # Update the global set
+        _blocked_words = words
+        log.info("Loaded %d blocked words from %s", len(words), excel_path)
+
+    except Exception as e:
+        log.warning("Failed to load words database: %s", e)
+        _blocked_words = set()
+
+
+def check_blocked_words(text: str) -> tuple[bool, str]:
+    """
+    Check if any blocked word appears in the given text.
+
+    Args:
+        text: The message/context text to check
+
+    Returns:
+        A tuple of (found: bool, matched_word: str)
+        - found: True if a blocked word was found
+        - matched_word: The first matched word (for logging/alerting)
+
+    How it works:
+        - Normalizes text to lowercase for case-insensitive matching
+        - Splits text into words and checks each against blocked words set
+        - Returns immediately on first match (O(n) where n = number of words in text)
+    """
+    if not _blocked_words:
+        # No words loaded - skip check
+        return False, ""
+
+    # Normalize text to lowercase
+    text_lower = text.lower()
+
+    # Split text into words (handles various whitespace and punctuation)
+    import re
+
+    words = re.findall(r"\b\w+\b", text_lower)
+
+    # Check each word against blocked words set
+    for word in words:
+        if word in _blocked_words:
+            log.info("Blocked word detected: '%s'", word)
+            return True, word
+
+    return False, ""
+
+
+# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 
@@ -69,10 +191,13 @@ log = logging.getLogger("hopmap-server")
 # Application lifespan
 # ---------------------------------------------------------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("HopMap server starting.")
     db.initialize_indexes()
+    # Load blocked words from Excel at startup
+    _load_blocked_words()
     yield
     log.info("HopMap server shutting down.")
     # Signal all open SSE generators to exit before Uvicorn's cancel deadline.
@@ -117,7 +242,7 @@ _llm: LLMProvider = get_provider(
 # Input validation
 # ---------------------------------------------------------------------------
 
-_CHILD_ID_RE = re.compile(r'^[a-zA-Z0-9_\-]{1,64}$')
+_CHILD_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
 
 
 def _validate_child_id(child_id: str) -> None:
@@ -200,18 +325,18 @@ def _run_llm_classify(context: str) -> dict:
 
 class ClassifyRequest(BaseModel):
     child_id: str = Field(..., alias="childId")
-    url:      str
-    context:  str
-    source:   str = "unknown"   # "ocr" | "clipboard" | "unknown"
+    url: str
+    context: str
+    source: str = "unknown"  # "ocr" | "clipboard" | "unknown"
 
     model_config = {"populate_by_name": True}
 
 
 class ClassifyResponse(BaseModel):
-    decision:   str            # "YES" | "NO"
-    confidence: int            # 0–100
-    reason:     str
-    via:        str = "server"
+    decision: str  # "YES" | "NO"
+    confidence: int  # 0–100
+    reason: str
+    via: str = "server"
 
 
 @app.post("/agent/classify", response_model=ClassifyResponse)
@@ -222,15 +347,18 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
     only a few lines of chat context so the payload is small.  Inference is the
     dominant latency — typically 1–4 s on a CPU with a 7B model.
 
+    Flow:
+        1. Check if any blocked word from the Excel database appears in context
+           → If found: return YES immediately (no LLM call needed)
+        2. Otherwise: call LLM for deeper analysis
+
     Returns HTTP 429 if the per-child rate limit is exceeded.
     Returns decision="NO", confidence=0 on any inference error so the agent
     treats the result as a non-event rather than a false positive.
     """
     _validate_child_id(body.child_id)
     if not await _check_classify_rate_limit(body.child_id):
-        log.warning(
-            "Classify rate limit hit  child=%r — rejecting.", body.child_id
-        )
+        log.warning("Classify rate limit hit  child=%r — rejecting.", body.child_id)
         raise HTTPException(
             status_code=429,
             detail="Classification rate limit exceeded.",
@@ -238,15 +366,42 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
 
     log.info(
         "Classifying  child=%r  source=%r  url=%s",
-        body.child_id, body.source, body.url,
+        body.child_id,
+        body.source,
+        body.url,
     )
+
+    # -----------------------------------------------------------------------
+    # STEP 1: Fast word matching BEFORE calling LLM
+    # -----------------------------------------------------------------------
+    # Check if any blocked word from the Excel DB appears in the message.
+    # This is a simple O(n) string match - much faster than LLM inference.
+    # If a word is found, we alert immediately without LLM.
+
+    word_found, matched_word = check_blocked_words(body.context)
+    if word_found:
+        # Blocked word detected - return YES immediately, no LLM needed
+        log.info(
+            "Blocked word matched for child=%r word=%r - skipping LLM",
+            body.child_id,
+            matched_word,
+        )
+        return ClassifyResponse(
+            decision="YES",
+            confidence=100,  # Maximum confidence for direct word match
+            reason=f"blocked_word: {matched_word}",
+            via="word_db",  # Indicates this came from word matching, not LLM
+        )
+
+    # -----------------------------------------------------------------------
+    # STEP 2: LLM classification (fallback when no blocked words found)
+    # -----------------------------------------------------------------------
+    # No blocked words matched - now use LLM for deeper analysis
 
     try:
         result = await asyncio.to_thread(_run_llm_classify, body.context)
     except json.JSONDecodeError as exc:
-        log.warning(
-            "LLM returned non-JSON for child %r: %s", body.child_id, exc
-        )
+        log.warning("LLM returned non-JSON for child %r: %s", body.child_id, exc)
         return ClassifyResponse(decision="NO", confidence=0, reason="parse_error")
     except Exception as exc:
         log.warning("LLM error for child %r: %s", body.child_id, exc)
@@ -254,14 +409,20 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
 
     log.info(
         "Classify result  child=%r  decision=%s  confidence=%d%%  reason=%r",
-        body.child_id, result["decision"], result["confidence"], result["reason"],
+        body.child_id,
+        result["decision"],
+        result["confidence"],
+        result["reason"],
     )
+    # Add via="server" to indicate this came from LLM (not word_db)
+    result["via"] = "server"
     return ClassifyResponse(**result)
 
 
 # ---------------------------------------------------------------------------
 # Hop event ingestion
 # ---------------------------------------------------------------------------
+
 
 @app.post("/agent/hop/{child_id}")
 async def agent_hop(child_id: str, request: Request) -> dict:
@@ -274,25 +435,25 @@ async def agent_hop(child_id: str, request: Request) -> dict:
     )
 
     event = {
-        "childId":            child_id,
-        "source":             "desktop",
-        "from":               body.get("from", ""),
-        "to":                 body.get("to", ""),
-        "fromTitle":          body.get("fromTitle", ""),
-        "toTitle":            body.get("toTitle", ""),
-        "timestamp":          body.get("timestamp", datetime.now(timezone.utc).isoformat()),
-        "blocked":            False,
-        "alert":              alert_reason is not None,
-        "alertReason":        alert_reason,
-        "receivedAt":         datetime.now(timezone.utc).isoformat(),
-        "clickConfidence":    body.get("clickConfidence"),
-        "confirmedTo":        body.get("confirmedTo"),
-        "confirmedToTitle":   body.get("confirmedToTitle"),
-        "confirmedAt":        body.get("confirmedAt"),
-        "context":            body.get("context"),
+        "childId": child_id,
+        "source": "desktop",
+        "from": body.get("from", ""),
+        "to": body.get("to", ""),
+        "fromTitle": body.get("fromTitle", ""),
+        "toTitle": body.get("toTitle", ""),
+        "timestamp": body.get("timestamp", datetime.now(timezone.utc).isoformat()),
+        "blocked": False,
+        "alert": alert_reason is not None,
+        "alertReason": alert_reason,
+        "receivedAt": datetime.now(timezone.utc).isoformat(),
+        "clickConfidence": body.get("clickConfidence"),
+        "confirmedTo": body.get("confirmedTo"),
+        "confirmedToTitle": body.get("confirmedToTitle"),
+        "confirmedAt": body.get("confirmedAt"),
+        "context": body.get("context"),
         "classifyConfidence": body.get("classifyConfidence"),
-        "classifyReason":     body.get("classifyReason"),
-        "classifySource":     body.get("classifySource"),
+        "classifyReason": body.get("classifyReason"),
+        "classifySource": body.get("classifySource"),
     }
 
     if alert_reason is not None and body.get("clickConfidence") != "switch_only":
@@ -301,8 +462,10 @@ async def agent_hop(child_id: str, request: Request) -> dict:
 
     log.info(
         "Hop  %r → %r  (%r → %r)  alert=%s",
-        event["from"], event["to"],
-        event["fromTitle"], event["toTitle"],
+        event["from"],
+        event["to"],
+        event["fromTitle"],
+        event["toTitle"],
         alert_reason or "none",
     )
     return {"ok": True}
@@ -311,6 +474,7 @@ async def agent_hop(child_id: str, request: Request) -> dict:
 # ---------------------------------------------------------------------------
 # SSE stream  (parent dashboard)
 # ---------------------------------------------------------------------------
+
 
 @app.get("/stream/{child_id}")
 async def stream(child_id: str, request: Request) -> StreamingResponse:
@@ -361,6 +525,7 @@ async def stream(child_id: str, request: Request) -> StreamingResponse:
 # Health
 # ---------------------------------------------------------------------------
 
+
 @app.get("/health")
 def health() -> dict:
     db_ok = db.ping()
@@ -370,6 +535,7 @@ def health() -> dict:
 # ---------------------------------------------------------------------------
 # Events
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/events/{child_id}")
 def get_events(child_id: str, limit: int = 100) -> dict:
@@ -391,6 +557,7 @@ def clear_events(child_id: str) -> dict:
 # Children
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/children")
 def list_children() -> dict:
     """Return all registered children (plus any event-derived ones)."""
@@ -398,7 +565,7 @@ def list_children() -> dict:
 
 
 class RegisterChildRequest(BaseModel):
-    child_id:   Optional[str] = Field(None, alias="childId")
+    child_id: Optional[str] = Field(None, alias="childId")
     child_name: str = Field("", alias="childName")
 
     model_config = {"populate_by_name": True}
@@ -440,6 +607,7 @@ def rename_child(child_id: str, body: RenameChildRequest) -> dict:
 # Demo seed  (dev / competition demo only — not for production)
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/demo/seed")
 async def seed_demo() -> dict:
     """Inject a pre-baked demo session for childId='demo'.
@@ -453,51 +621,64 @@ async def seed_demo() -> dict:
 
     demo_hops = [
         {
-            "from": "explorer.exe",         "to": "robloxplayerbeta.exe",
-            "fromTitle": "Desktop",         "toTitle": "Roblox",
+            "from": "explorer.exe",
+            "to": "robloxplayerbeta.exe",
+            "fromTitle": "Desktop",
+            "toTitle": "Roblox",
         },
         {
-            "from": "robloxplayerbeta.exe", "to": "chrome.exe",
-            "fromTitle": "Roblox",          "toTitle": "Google Chrome",
+            "from": "robloxplayerbeta.exe",
+            "to": "chrome.exe",
+            "fromTitle": "Roblox",
+            "toTitle": "Google Chrome",
         },
         {
-            "from": "chrome.exe",           "to": "discord.exe",
-            "fromTitle": "Chrome",          "toTitle": "Discord",
-            "detection": "confirmed_hop",   "alertReason": "confirmed_hop",
+            "from": "chrome.exe",
+            "to": "discord.exe",
+            "fromTitle": "Chrome",
+            "toTitle": "Discord",
+            "detection": "confirmed_hop",
+            "alertReason": "confirmed_hop",
             "classifyConfidence": 92,
-            "classifyReason":     "discord link shared in game chat",
-            "classifySource":     "server",
-            "clickConfidence":    "app_match",
+            "classifyReason": "discord link shared in game chat",
+            "classifySource": "server",
+            "clickConfidence": "app_match",
         },
         {
-            "from": "discord.exe",          "to": "telegram.exe",
-            "fromTitle": "Discord",         "toTitle": "Telegram",
+            "from": "discord.exe",
+            "to": "telegram.exe",
+            "fromTitle": "Discord",
+            "toTitle": "Telegram",
         },
         {
-            "from": "telegram.exe",         "to": "robloxplayerbeta.exe",
-            "fromTitle": "Telegram",        "toTitle": "Roblox",
+            "from": "telegram.exe",
+            "to": "robloxplayerbeta.exe",
+            "fromTitle": "Telegram",
+            "toTitle": "Roblox",
         },
     ]
 
     inserted = []
     for i, hop in enumerate(demo_hops):
         event = {
-            "childId":            "demo",
-            "source":             "desktop",
-            "from":               hop["from"],
-            "to":                 hop["to"],
-            "fromTitle":          hop["fromTitle"],
-            "toTitle":            hop["toTitle"],
-            "timestamp":          datetime.fromtimestamp(base_time + i * 240, tz=timezone.utc).isoformat(),
-            "blocked":            False,
-            "alert":              hop.get("alertReason") is not None,
-            "alertReason":        hop.get("alertReason"),
-            "receivedAt":         datetime.now(timezone.utc).isoformat(),
-            "detection":          hop.get("detection"),
-            "clickConfidence":    hop.get("clickConfidence"),
+            "childId": "demo",
+            "source": "desktop",
+            "from": hop["from"],
+            "to": hop["to"],
+            "fromTitle": hop["fromTitle"],
+            "toTitle": hop["toTitle"],
+            "timestamp": datetime.fromtimestamp(
+                base_time + i * 240, tz=timezone.utc
+            ).isoformat(),
+            "blocked": False,
+            "alert": hop.get("alertReason") is not None,
+            "alertReason": hop.get("alertReason"),
+            "receivedAt": datetime.now(timezone.utc).isoformat(),
+            "detection": hop.get("detection"),
+            "clickConfidence": hop.get("clickConfidence"),
             "classifyConfidence": hop.get("classifyConfidence"),
-            "classifyReason":     hop.get("classifyReason"),
-            "classifySource":     hop.get("classifySource"),
+            "classifyReason": hop.get("classifyReason"),
+            "classifySource": hop.get("classifySource"),
         }
         if event["alertReason"] is not None:
             db.insert_event(event)
@@ -514,7 +695,8 @@ async def seed_demo() -> dict:
 if __name__ == "__main__":
     log.info(
         "Starting HopMap server on %s:%d",
-        server_config.host, server_config.port,
+        server_config.host,
+        server_config.port,
     )
     try:
         uvicorn.run(
