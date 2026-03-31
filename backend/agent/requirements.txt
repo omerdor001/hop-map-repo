@@ -16,3 +16,5 @@ pytesseract>=0.3.13
 Pillow>=10.0.0
 # Clipboard monitoring
 pyperclip>=1.9.0
+# Excel reading for platform DB
+openpyxl>=3.1.0
