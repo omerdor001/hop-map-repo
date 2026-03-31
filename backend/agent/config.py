@@ -1,6 +1,6 @@
 """
 HopMap Agent — Configuration
-================================
+===============================
 Imported by agent.py (runs on the kid's Windows PC).
 All values are read from environment variables (with sensible defaults).
 
@@ -9,8 +9,17 @@ Setup:
 """
 
 import os
+import sys
+from pathlib import Path
 from dataclasses import dataclass
 from dotenv import load_dotenv
+
+# Add backend folder to path so we can import shared_config
+_backend_dir = Path(__file__).parent.resolve().parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
+from shared_config import PLATFORMS_DB_PATH
 
 load_dotenv()
 
@@ -30,10 +39,9 @@ class AgentConfig:
     context_lines: int = int(os.getenv("CONTEXT_LINES", "10"))
 
     # Path to the Excel file containing platform process mappings
-    # Excel should have columns: "platform", "process" (one process per row, can have multiple rows per platform)
-    # Example: C:\Users\alex\Documents\platforms.xlsx
-    # Leave empty to use hardcoded default mappings
-    platforms_db_path: str = os.getenv("PLATFORMS_DB_PATH", "")
+    # Default: backend/agent/platforms_db.xlsx (relative to shared_config.py location)
+    # Can be overridden with PLATFORMS_DB_PATH env var
+    platforms_db_path: str = os.getenv("PLATFORMS_DB_PATH", PLATFORMS_DB_PATH)
 
 
 # ── Singleton instance ────────────────────────────────────────────────────────

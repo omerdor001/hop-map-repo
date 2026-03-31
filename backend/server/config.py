@@ -1,6 +1,6 @@
 """
 HopMap Server — Configuration
-================================
+===============================
 Imported by server.py and db.py.
 All values are read from environment variables (with sensible defaults).
 
@@ -11,8 +11,17 @@ To switch between local MongoDB (Compass) and Atlas, change MONGO_URI only.
 """
 
 import os
+import sys
+from pathlib import Path
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
+
+# Add backend folder to path so we can import shared_config
+_backend_dir = Path(__file__).parent.resolve().parent
+if str(_backend_dir) not in sys.path:
+    sys.path.insert(0, str(_backend_dir))
+
+from shared_config import WORDS_DB_PATH
 
 load_dotenv()
 
@@ -38,8 +47,9 @@ class ServerConfig:
 
     # Path to the Excel file containing blocked words (nasty words database)
     # Excel should have a column header "word" with words to flag
-    # Example: C:\Users\alex\Documents\nasty_words.xlsx
-    words_db_path: str = os.getenv("WORDS_DB_PATH", "")
+    # Default: backend/server/hopmap_words_db.xlsx (relative to shared_config.py location)
+    # Can be overridden with WORDS_DB_PATH env var
+    words_db_path: str = os.getenv("WORDS_DB_PATH", WORDS_DB_PATH)
 
     # LLM provider backend.  Currently supported: "ollama"
     # Switch by setting LLM_PROVIDER=<name> in .env once a new provider is
