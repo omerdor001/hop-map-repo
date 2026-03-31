@@ -29,6 +29,12 @@ class AgentConfig:
     # How many chat lines around a detected URL to send to Ollama for context
     context_lines: int = int(os.getenv("CONTEXT_LINES", "10"))
 
+    # Path to the Excel file containing platform process mappings
+    # Excel should have columns: "platform", "process" (one process per row, can have multiple rows per platform)
+    # Example: C:\Users\alex\Documents\platforms.xlsx
+    # Leave empty to use hardcoded default mappings
+    platforms_db_path: str = os.getenv("PLATFORMS_DB_PATH", "")
+
 
 # ── Singleton instance ────────────────────────────────────────────────────────
 agent_config = AgentConfig()
