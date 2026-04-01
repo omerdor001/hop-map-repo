@@ -105,14 +105,58 @@ _configure_tesseract()
 # Configuration
 # ---------------------------------------------------------------------------
 
-BACKEND_URL   = agent_config.backend_url
-CHILD_ID: str = ""   # assigned by the server on startup
+BACKEND_URL = agent_config.backend_url
+CHILD_ID: str = ""  # assigned by the server on startup
 SCAN_INTERVAL = agent_config.scan_interval_seconds
 CONTEXT_LINES = agent_config.context_lines
+ENABLE_CHILD_ALERTS = (
+    agent_config.enable_child_alerts
+)  # show warning to child on hop detection
 
 # File where the server-assigned child ID is persisted so the same record is
 # reused across agent restarts rather than creating a new orphaned profile.
 _CHILD_ID_FILE = pathlib.Path(__file__).parent / ".child_id"
+
+
+# ---------------------------------------------------------------------------
+# Child Alert — warn the child about grooming/hop attempts
+# ---------------------------------------------------------------------------
+
+
+def _show_child_alert(lure_url: str, destination: str) -> None:
+    """Send a child alert event to the server for the frontend to display.
+
+    This notifies the frontend that a hop was confirmed so it can show a
+    designed alert to the child (grooming warning).
+    """
+    if not ENABLE_CHILD_ALERTS:
+        return
+
+    extracted_domain = ""
+    try:
+        extracted_domain = urlparse(lure_url).netloc
+    except Exception as exc:
+        log.warning("Failed to extract domain from URL: %s", exc)
+
+    payload = {
+        "childId": CHILD_ID,
+        "type": "childAlert",
+        "lureUrl": lure_url,
+        "extractedDomain": extracted_domain,
+        "destination": destination,
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+    }
+
+    try:
+        resp = requests.post(
+            f"{BACKEND_URL}/agent/child-alert",
+            json=payload,
+            timeout=5,
+        )
+        resp.raise_for_status()
+        log.info("Child alert sent to server for frontend display.")
+    except Exception as exc:
+        log.error("Failed to send child alert to server: %s", exc)
 
 
 def _register_child() -> str:
@@ -156,6 +200,7 @@ def _register_child() -> str:
         log.warning("Could not reach server for registration: %s", exc)
         return "child-unknown"
 
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -170,7 +215,9 @@ log.propagate = False
 if not log.handlers:
     _handler = logging.StreamHandler()
     _handler.setFormatter(
-        logging.Formatter("[%(asctime)s] %(levelname)s  %(message)s", datefmt="%H:%M:%S")
+        logging.Formatter(
+            "[%(asctime)s] %(levelname)s  %(message)s", datefmt="%H:%M:%S"
+        )
     )
     log.addHandler(_handler)
 
@@ -178,16 +225,22 @@ if not log.handlers:
 # Game-process registry
 # ---------------------------------------------------------------------------
 
-_GAME_PROCESSES: frozenset[str] = frozenset({
-    "robloxplayerbeta.exe", "roblox.exe",
-    "minecraft.exe", "minecraftlauncher.exe",
-    "javaw.exe",            # Minecraft Java Edition
-    "fortnite.exe",
-    "steam.exe", "steamwebhelper.exe",
-    "leagueclient.exe", "league of legends.exe",
-    "valorant.exe",
-    "gta5.exe",
-})
+_GAME_PROCESSES: frozenset[str] = frozenset(
+    {
+        "robloxplayerbeta.exe",
+        "roblox.exe",
+        "minecraft.exe",
+        "minecraftlauncher.exe",
+        "javaw.exe",  # Minecraft Java Edition
+        "fortnite.exe",
+        "steam.exe",
+        "steamwebhelper.exe",
+        "leagueclient.exe",
+        "league of legends.exe",
+        "valorant.exe",
+        "gta5.exe",
+    }
+)
 
 
 def _is_game(proc_name: str) -> bool:
@@ -203,33 +256,41 @@ def _is_game(proc_name: str) -> bool:
 # browser-title poll (tier 2).
 
 _PLATFORM_APP_MAP: dict[str, frozenset[str]] = {
-    "discord":   frozenset({"discord.exe"}),
-    "telegram":  frozenset({"telegram.exe", "telegramdesktop.exe"}),
-    "whatsapp":  frozenset({"whatsapp.exe", "whatsapp.root.exe"}),
-    "signal":    frozenset({"signal.exe"}),
-    "snapchat":  frozenset({"snapchat.exe"}),
-    "instagram": frozenset(),   # web / mobile only on desktop
-    "tiktok":    frozenset(),
-    "youtube":   frozenset(),
-    "twitch":    frozenset(),
+    "discord": frozenset({"discord.exe"}),
+    "telegram": frozenset({"telegram.exe", "telegramdesktop.exe"}),
+    "whatsapp": frozenset({"whatsapp.exe", "whatsapp.root.exe"}),
+    "signal": frozenset({"signal.exe"}),
+    "snapchat": frozenset({"snapchat.exe"}),
+    "instagram": frozenset(),  # web / mobile only on desktop
+    "tiktok": frozenset(),
+    "youtube": frozenset(),
+    "twitch": frozenset(),
 }
 
-_BROWSER_PROCESSES: frozenset[str] = frozenset({
-    "chrome.exe", "msedge.exe", "firefox.exe",
-    "opera.exe", "brave.exe", "vivaldi.exe",
-})
+_BROWSER_PROCESSES: frozenset[str] = frozenset(
+    {
+        "chrome.exe",
+        "msedge.exe",
+        "firefox.exe",
+        "opera.exe",
+        "brave.exe",
+        "vivaldi.exe",
+    }
+)
 
 # Shell and taskbar processes that appear transiently during an app launch.
 # We skip these when deciding whether a pending hop has been confirmed and
 # wait for the real destination process to reach the foreground.
-_TRANSIT_PROCESSES: frozenset[str] = frozenset({
-    "explorer.exe",
-    "searchhost.exe",
-    "searchapp.exe",
-    "shellexperiencehost.exe",
-    "startmenuexperiencehost.exe",
-    "applicationframehost.exe",
-})
+_TRANSIT_PROCESSES: frozenset[str] = frozenset(
+    {
+        "explorer.exe",
+        "searchhost.exe",
+        "searchapp.exe",
+        "shellexperiencehost.exe",
+        "startmenuexperiencehost.exe",
+        "applicationframehost.exe",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # URL utilities
@@ -239,7 +300,7 @@ _TRANSIT_PROCESSES: frozenset[str] = frozenset({
 # "discord.gg/abc" or "t.me/xyz".  Requiring at least one slash after the TLD
 # prevents bare process names like "discord.exe" from matching.
 _URL_RE = re.compile(
-    r"https?://[^\s\"'<>]+"           # full https / http URL
+    r"https?://[^\s\"'<>]+"  # full https / http URL
     r"|[a-z0-9\-]+\.[a-z]{2,}/\S+",  # bare domain/path  e.g. discord.gg/abc
     re.IGNORECASE,
 )
@@ -273,13 +334,14 @@ def _app_matches_url(url: str, proc: str) -> bool:
 # Context extraction
 # ---------------------------------------------------------------------------
 
+
 def _extract_context(text: str, url: str, n: int = CONTEXT_LINES) -> str:
     """Return up to *n* lines centred on the line that contains *url*."""
     lines = text.splitlines()
     for i, line in enumerate(lines):
         if url in line:
             start = max(0, i - n // 2)
-            end   = min(len(lines), start + n)
+            end = min(len(lines), start + n)
             return "\n".join(lines[start:end])
     return url  # fallback: just the URL itself
 
@@ -287,6 +349,7 @@ def _extract_context(text: str, url: str, n: int = CONTEXT_LINES) -> str:
 # ---------------------------------------------------------------------------
 # TTL de-duplication cache
 # ---------------------------------------------------------------------------
+
 
 class _TTLCache:
     """Bounded, time-expiring membership set.  Thread-safe.
@@ -297,10 +360,10 @@ class _TTLCache:
     """
 
     def __init__(self, ttl_seconds: int = 300, max_size: int = 500) -> None:
-        self._ttl   = ttl_seconds
-        self._max   = max_size
+        self._ttl = ttl_seconds
+        self._max = max_size
         self._store: OrderedDict[str, float] = OrderedDict()
-        self._lock  = threading.Lock()
+        self._lock = threading.Lock()
 
     def seen(self, key: str) -> bool:
         now = time.monotonic()
@@ -333,17 +396,19 @@ _url_seen_global: _TTLCache = _TTLCache(ttl_seconds=300)
 # Classification result
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class _ClassifyResult:
-    is_hop:     bool
-    confidence: int    # 0–100
-    reason:     str
-    via:        str    # "server" | "error"
+    is_hop: bool
+    confidence: int  # 0–100
+    reason: str
+    via: str  # "server" | "error"
 
 
 # ---------------------------------------------------------------------------
 # Classifier  (delegates entirely to the HopMap server)
 # ---------------------------------------------------------------------------
+
 
 def _classify(url: str, context: str, detection_source: str) -> _ClassifyResult:
     """POST a classify request to the HopMap server and return a structured result.
@@ -357,9 +422,9 @@ def _classify(url: str, context: str, detection_source: str) -> _ClassifyResult:
     """
     payload = {
         "childId": CHILD_ID,
-        "url":     url,
+        "url": url,
         "context": context,
-        "source":  detection_source,
+        "source": detection_source,
     }
 
     try:
@@ -369,14 +434,17 @@ def _classify(url: str, context: str, detection_source: str) -> _ClassifyResult:
             timeout=8,
         )
         resp.raise_for_status()
-        data       = resp.json()
-        decision   = str(data.get("decision", "NO")).upper()
+        data = resp.json()
+        decision = str(data.get("decision", "NO")).upper()
         confidence = max(0, min(100, int(data.get("confidence", 0))))
-        reason     = str(data.get("reason", "")).strip()
+        reason = str(data.get("reason", "")).strip()
 
         log.debug(
             "Classify → %s  %d%%  %r  (%s)",
-            decision, confidence, reason, url,
+            decision,
+            confidence,
+            reason,
+            url,
         )
         return _ClassifyResult(decision.startswith("YES"), confidence, reason, "server")
 
@@ -388,6 +456,7 @@ def _classify(url: str, context: str, detection_source: str) -> _ClassifyResult:
 # ---------------------------------------------------------------------------
 # Window helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_window(hwnd: int) -> tuple[str, str]:
     """Return *(proc_name_lower, window_title)* for *hwnd*."""
@@ -418,6 +487,7 @@ def _hwnd_rect(hwnd: int) -> Optional[tuple[int, int, int, int]]:
 # OCR
 # ---------------------------------------------------------------------------
 
+
 def _ocr_window(hwnd: int) -> str:
     """Screenshot *hwnd* and return all Tesseract-extracted text."""
     region = _hwnd_rect(hwnd)
@@ -444,7 +514,7 @@ def _sender_loop() -> None:
     """Drain *_send_queue* and POST each hop event to the backend."""
     while True:
         event = _send_queue.get()
-        if event is None:   # shutdown sentinel
+        if event is None:  # shutdown sentinel
             return
         try:
             resp = requests.post(
@@ -469,7 +539,7 @@ def _enqueue_hop(event: dict) -> None:
 # Keyed by URL so that simultaneous lures from different links are tracked
 # independently.  All mutations must be performed while holding *_pending_lock*.
 
-_pending_lock         = threading.Lock()
+_pending_lock = threading.Lock()
 _pending_hop_attempts: dict[str, dict] = {}
 
 # ---------------------------------------------------------------------------
@@ -491,8 +561,8 @@ _pending_hop_attempts: dict[str, dict] = {}
 #
 # All mutations must be performed while holding *_last_switch_lock*.
 
-_last_switch_lock      = threading.Lock()
-_last_non_game_switch: Optional[dict] = None   # { proc, title, hwnd, at }
+_last_switch_lock = threading.Lock()
+_last_non_game_switch: Optional[dict] = None  # { proc, title, hwnd, at }
 
 # Maximum age (seconds) of a recorded switch that _try_late_confirm will
 # still act on.  Prevents a switch from many minutes ago being incorrectly
@@ -512,11 +582,12 @@ _current_game: Optional[tuple[str, str]] = None
 # Click-confidence: browser title poll  (tier 2)
 # ---------------------------------------------------------------------------
 
+
 def _poll_browser_title(
-    hwnd:     int,
-    domain:   str,
-    event:    dict,
-    timeout:  float = 10.0,
+    hwnd: int,
+    domain: str,
+    event: dict,
+    timeout: float = 10.0,
     interval: float = 0.5,
 ) -> None:
     """Poll the browser window title for *domain*; fire _enqueue_hop when found.
@@ -544,19 +615,20 @@ def _poll_browser_title(
 # Hop confirmation
 # ---------------------------------------------------------------------------
 
+
 def _confirm_pending(
     pending: dict,
-    proc:    str,
-    title:   str,
-    hwnd:    int,
+    proc: str,
+    title: str,
+    hwnd: int,
 ) -> None:
     """Apply click-confidence logic and dispatch the confirmed hop event."""
-    lure_url   = pending["to"]
+    lure_url = pending["to"]
     base_event = {
         **pending,
-        "confirmedTo":      proc,
+        "confirmedTo": proc,
         "confirmedToTitle": title,
-        "confirmedAt":      datetime.now(tz=timezone.utc).isoformat(),
+        "confirmedAt": datetime.now(tz=timezone.utc).isoformat(),
     }
 
     if _app_matches_url(lure_url, proc):
@@ -582,6 +654,7 @@ def _confirm_pending(
 # Late-confirm helper
 # ---------------------------------------------------------------------------
 
+
 def _drain_and_confirm(proc: str, title: str, hwnd: int) -> None:
     """Atomically drain *_pending_hop_attempts* and confirm each lure against
     the given destination.  Safe to call from any thread."""
@@ -593,6 +666,11 @@ def _drain_and_confirm(proc: str, title: str, hwnd: int) -> None:
 
     for pending in snapshot.values():
         _confirm_pending(pending, proc, title, hwnd)
+
+    # Alert the child about the grooming attempt if enabled
+    for pending in snapshot.values():
+        if ENABLE_CHILD_ALERTS:
+            _show_child_alert(pending.get("to", ""), proc)
 
 
 def _is_hop_destination(proc: str) -> bool:
@@ -639,7 +717,8 @@ def _try_late_confirm(game_proc: str) -> None:
     if last and age <= _LATE_CONFIRM_MAX_AGE and _is_hop_destination(last["proc"]):
         log.warning(
             "CONFIRMED hop (late, switch to %r happened %.1fs ago).",
-            last["proc"], age,
+            last["proc"],
+            age,
         )
         _drain_and_confirm(last["proc"], last["title"], last["hwnd"])
         return
@@ -665,11 +744,12 @@ def _try_late_confirm(game_proc: str) -> None:
 # Classify-and-park dispatcher
 # ---------------------------------------------------------------------------
 
+
 def _decide_and_send(
-    url:              str,
-    context:          str,
-    game_proc:        str,
-    game_title:       str,
+    url: str,
+    context: str,
+    game_proc: str,
+    game_title: str,
     detection_source: str,
 ) -> None:
     """Classify *url* via the server (or fallback); park a pending hop on YES.
@@ -682,26 +762,30 @@ def _decide_and_send(
     if not result.is_hop:
         log.debug(
             "Safe  %d%%  %r  (%s).",
-            result.confidence, result.reason, url,
+            result.confidence,
+            result.reason,
+            url,
         )
         return
 
     log.warning(
         "⚠ Hop attempt  %r  — %s (%d%% confidence).  Watching for app switch…",
-        url, result.reason, result.confidence,
+        url,
+        result.reason,
+        result.confidence,
     )
 
     pending: dict = {
-        "from":               game_proc,
-        "to":                 url,
-        "fromTitle":          game_title,
-        "toTitle":            f"[link] {url}",
-        "context":            context,
-        "timestamp":          datetime.now(tz=timezone.utc).isoformat(),
-        "detection":          "confirmed_hop",
+        "from": game_proc,
+        "to": url,
+        "fromTitle": game_title,
+        "toTitle": f"[link] {url}",
+        "context": context,
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "detection": "confirmed_hop",
         "classifyConfidence": result.confidence,
-        "classifyReason":     result.reason,
-        "classifySource":     result.via,
+        "classifyReason": result.reason,
+        "classifySource": result.via,
     }
 
     with _pending_lock:
@@ -718,10 +802,10 @@ _current_scanner_stop: Optional[threading.Event] = None
 
 
 def _scanner_loop(
-    hwnd:       int,
-    game_proc:  str,
+    hwnd: int,
+    game_proc: str,
     game_title: str,
-    stop:       threading.Event,
+    stop: threading.Event,
 ) -> None:
     """Periodically OCR the game window and classify every new URL found."""
     log.info("Monitoring game: %s", game_proc)
@@ -764,6 +848,7 @@ def _scanner_loop(
 # Clipboard monitor
 # ---------------------------------------------------------------------------
 
+
 def _clipboard_monitor_loop(stop: threading.Event) -> None:
     """Poll the system clipboard every second for hop-luring URLs.
 
@@ -798,7 +883,13 @@ def _clipboard_monitor_loop(stop: threading.Event) -> None:
                 log.info("Link in clipboard: %s", url)
                 threading.Thread(
                     target=_decide_and_send,
-                    args=(url, f"[clipboard] {url}", game_proc, game_title, "clipboard"),
+                    args=(
+                        url,
+                        f"[clipboard] {url}",
+                        game_proc,
+                        game_title,
+                        "clipboard",
+                    ),
                     daemon=True,
                     name="classify-dispatch",
                 ).start()
@@ -813,7 +904,7 @@ def _clipboard_monitor_loop(stop: threading.Event) -> None:
 _user32 = ctypes.windll.user32
 
 EVENT_SYSTEM_FOREGROUND = 0x0003
-WINEVENT_OUTOFCONTEXT   = 0x0000
+WINEVENT_OUTOFCONTEXT = 0x0000
 
 _WinEventProc = ctypes.WINFUNCTYPE(
     None,
@@ -838,13 +929,13 @@ _hwnd_event_queue: queue.Queue[Optional[int]] = queue.Queue()
 
 
 def _on_foreground_change(
-    hWinEventHook,   # noqa: N803  — Win32 naming convention
+    hWinEventHook,  # noqa: N803  — Win32 naming convention
     event,
     hwnd,
-    idObject,        # noqa: N803
-    idChild,         # noqa: N803
-    dwEventThread,   # noqa: N803
-    dwmsEventTime,   # noqa: N803
+    idObject,  # noqa: N803
+    idChild,  # noqa: N803
+    dwEventThread,  # noqa: N803
+    dwmsEventTime,  # noqa: N803
 ) -> None:
     """Win32 event callback — MUST return immediately.  Enqueues HWND only."""
     if hwnd:
@@ -855,8 +946,8 @@ def _on_foreground_change(
 # Event processor
 # ---------------------------------------------------------------------------
 
-_prev_proc:      str                        = ""
-_prev_title:     str                        = ""
+_prev_proc: str = ""
+_prev_title: str = ""
 _scanner_thread: Optional[threading.Thread] = None
 
 
@@ -867,7 +958,13 @@ def _process_foreground_change(hwnd: int) -> None:
     thread — no additional locking is needed for the module-level _prev_proc /
     _prev_title / scanner state.
     """
-    global _prev_proc, _prev_title, _scanner_thread, _current_scanner_stop, _current_game, _last_non_game_switch
+    global \
+        _prev_proc, \
+        _prev_title, \
+        _scanner_thread, \
+        _current_scanner_stop, \
+        _current_game, \
+        _last_non_game_switch
 
     proc, title = _resolve_window(hwnd)
     if proc == _prev_proc:
@@ -875,7 +972,8 @@ def _process_foreground_change(hwnd: int) -> None:
 
     log.debug(
         "App switch: %s → %s",
-        _prev_proc, proc,
+        _prev_proc,
+        proc,
     )
 
     # ------------------------------------------------------------------
@@ -902,10 +1000,10 @@ def _process_foreground_change(hwnd: int) -> None:
     if not _is_game(proc) and proc not in _TRANSIT_PROCESSES:
         with _last_switch_lock:
             _last_non_game_switch = {
-                "proc":  proc,
+                "proc": proc,
                 "title": title,
-                "hwnd":  hwnd,
-                "at":    time.monotonic(),
+                "hwnd": hwnd,
+                "at": time.monotonic(),
             }
 
     # ------------------------------------------------------------------
@@ -921,7 +1019,7 @@ def _process_foreground_change(hwnd: int) -> None:
     # Start a new scanner on game entry; record a plain hop otherwise
     # ------------------------------------------------------------------
     if _is_game(proc):
-        _current_game = (proc, title)   # clipboard monitor may now classify
+        _current_game = (proc, title)  # clipboard monitor may now classify
         stop = threading.Event()
         _current_scanner_stop = stop
         _scanner_thread = threading.Thread(
@@ -932,22 +1030,24 @@ def _process_foreground_change(hwnd: int) -> None:
         )
         _scanner_thread.start()
     else:
-        _current_game = None            # clipboard monitor stops classifying
+        _current_game = None  # clipboard monitor stops classifying
         # Skip transit shells — they are intermediate steps, not real
         # destinations, and posting them is pure noise.
         # Only report this plain switch when leaving a game.
         # Non-game-to-non-game switches (e.g. discord → code) are noise.
         if proc not in _TRANSIT_PROCESSES and _is_game(_prev_proc):
-            _enqueue_hop({
-                "from":      _prev_proc,
-                "to":        proc,
-                "fromTitle": _prev_title,
-                "toTitle":   title,
-                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-                "detection": "foreground_hook",
-            })
+            _enqueue_hop(
+                {
+                    "from": _prev_proc,
+                    "to": proc,
+                    "fromTitle": _prev_title,
+                    "toTitle": title,
+                    "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                    "detection": "foreground_hook",
+                }
+            )
 
-    _prev_proc  = proc
+    _prev_proc = proc
     _prev_title = title
 
 
@@ -955,7 +1055,7 @@ def _event_processor_loop() -> None:
     """Drain *_hwnd_event_queue* and dispatch each HWND to the handler."""
     while True:
         hwnd = _hwnd_event_queue.get()
-        if hwnd is None:    # shutdown sentinel
+        if hwnd is None:  # shutdown sentinel
             return
         try:
             _process_foreground_change(hwnd)
@@ -967,18 +1067,17 @@ def _event_processor_loop() -> None:
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def run() -> None:
     """Start all background threads, register the Win32 hook, and pump the
     Windows message loop until Ctrl-C is pressed."""
     global _prev_proc, _prev_title, _current_scanner_stop, _current_game
 
-    initial_hwnd            = win32gui.GetForegroundWindow()
+    initial_hwnd = win32gui.GetForegroundWindow()
     _prev_proc, _prev_title = _resolve_window(initial_hwnd)
 
     # ── Background threads ────────────────────────────────────────────────
-    threading.Thread(
-        target=_sender_loop, daemon=True, name="hop-sender"
-    ).start()
+    threading.Thread(target=_sender_loop, daemon=True, name="hop-sender").start()
     threading.Thread(
         target=_event_processor_loop, daemon=True, name="event-processor"
     ).start()
@@ -994,8 +1093,13 @@ def run() -> None:
     # ── Win32 event hook ──────────────────────────────────────────────────
     hook_proc = _WinEventProc(_on_foreground_change)
     hook = _user32.SetWinEventHook(
-        EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
-        0, hook_proc, 0, 0, WINEVENT_OUTOFCONTEXT,
+        EVENT_SYSTEM_FOREGROUND,
+        EVENT_SYSTEM_FOREGROUND,
+        0,
+        hook_proc,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT,
     )
     if not hook:
         log.error("SetWinEventHook failed — aborting.")
@@ -1026,7 +1130,7 @@ def run() -> None:
     # ── Windows message loop ──────────────────────────────────────────────
     # PeekMessageW + a 100 ms sleep keeps CPU usage near zero while allowing
     # the Win32 hook to fire reliably for every foreground change.
-    msg       = ctypes.wintypes.MSG()
+    msg = ctypes.wintypes.MSG()
     PM_REMOVE = 0x0001
 
     try:
@@ -1042,7 +1146,7 @@ def run() -> None:
             _current_scanner_stop.set()
         clipboard_stop.set()
         _user32.UnhookWinEvent(hook)
-        _send_queue.put(None)        # hop-sender sentinel
+        _send_queue.put(None)  # hop-sender sentinel
         _hwnd_event_queue.put(None)  # event-processor sentinel
 
 

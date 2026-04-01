@@ -69,6 +69,7 @@ log = logging.getLogger("hopmap-server")
 # Application lifespan
 # ---------------------------------------------------------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("HopMap server starting.")
@@ -117,7 +118,7 @@ _llm: LLMProvider = get_provider(
 # Input validation
 # ---------------------------------------------------------------------------
 
-_CHILD_ID_RE = re.compile(r'^[a-zA-Z0-9_\-]{1,64}$')
+_CHILD_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
 
 
 def _validate_child_id(child_id: str) -> None:
@@ -200,18 +201,18 @@ def _run_llm_classify(context: str) -> dict:
 
 class ClassifyRequest(BaseModel):
     child_id: str = Field(..., alias="childId")
-    url:      str
-    context:  str
-    source:   str = "unknown"   # "ocr" | "clipboard" | "unknown"
+    url: str
+    context: str
+    source: str = "unknown"  # "ocr" | "clipboard" | "unknown"
 
     model_config = {"populate_by_name": True}
 
 
 class ClassifyResponse(BaseModel):
-    decision:   str            # "YES" | "NO"
-    confidence: int            # 0–100
-    reason:     str
-    via:        str = "server"
+    decision: str  # "YES" | "NO"
+    confidence: int  # 0–100
+    reason: str
+    via: str = "server"
 
 
 @app.post("/agent/classify", response_model=ClassifyResponse)
@@ -228,9 +229,7 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
     """
     _validate_child_id(body.child_id)
     if not await _check_classify_rate_limit(body.child_id):
-        log.warning(
-            "Classify rate limit hit  child=%r — rejecting.", body.child_id
-        )
+        log.warning("Classify rate limit hit  child=%r — rejecting.", body.child_id)
         raise HTTPException(
             status_code=429,
             detail="Classification rate limit exceeded.",
@@ -238,15 +237,15 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
 
     log.info(
         "Classifying  child=%r  source=%r  url=%s",
-        body.child_id, body.source, body.url,
+        body.child_id,
+        body.source,
+        body.url,
     )
 
     try:
         result = await asyncio.to_thread(_run_llm_classify, body.context)
     except json.JSONDecodeError as exc:
-        log.warning(
-            "LLM returned non-JSON for child %r: %s", body.child_id, exc
-        )
+        log.warning("LLM returned non-JSON for child %r: %s", body.child_id, exc)
         return ClassifyResponse(decision="NO", confidence=0, reason="parse_error")
     except Exception as exc:
         log.warning("LLM error for child %r: %s", body.child_id, exc)
@@ -254,7 +253,10 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
 
     log.info(
         "Classify result  child=%r  decision=%s  confidence=%d%%  reason=%r",
-        body.child_id, result["decision"], result["confidence"], result["reason"],
+        body.child_id,
+        result["decision"],
+        result["confidence"],
+        result["reason"],
     )
     return ClassifyResponse(**result)
 
@@ -262,6 +264,7 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
 # ---------------------------------------------------------------------------
 # Hop event ingestion
 # ---------------------------------------------------------------------------
+
 
 @app.post("/agent/hop/{child_id}")
 async def agent_hop(child_id: str, request: Request) -> dict:
@@ -274,25 +277,25 @@ async def agent_hop(child_id: str, request: Request) -> dict:
     )
 
     event = {
-        "childId":            child_id,
-        "source":             "desktop",
-        "from":               body.get("from", ""),
-        "to":                 body.get("to", ""),
-        "fromTitle":          body.get("fromTitle", ""),
-        "toTitle":            body.get("toTitle", ""),
-        "timestamp":          body.get("timestamp", datetime.now(timezone.utc).isoformat()),
-        "blocked":            False,
-        "alert":              alert_reason is not None,
-        "alertReason":        alert_reason,
-        "receivedAt":         datetime.now(timezone.utc).isoformat(),
-        "clickConfidence":    body.get("clickConfidence"),
-        "confirmedTo":        body.get("confirmedTo"),
-        "confirmedToTitle":   body.get("confirmedToTitle"),
-        "confirmedAt":        body.get("confirmedAt"),
-        "context":            body.get("context"),
+        "childId": child_id,
+        "source": "desktop",
+        "from": body.get("from", ""),
+        "to": body.get("to", ""),
+        "fromTitle": body.get("fromTitle", ""),
+        "toTitle": body.get("toTitle", ""),
+        "timestamp": body.get("timestamp", datetime.now(timezone.utc).isoformat()),
+        "blocked": False,
+        "alert": alert_reason is not None,
+        "alertReason": alert_reason,
+        "receivedAt": datetime.now(timezone.utc).isoformat(),
+        "clickConfidence": body.get("clickConfidence"),
+        "confirmedTo": body.get("confirmedTo"),
+        "confirmedToTitle": body.get("confirmedToTitle"),
+        "confirmedAt": body.get("confirmedAt"),
+        "context": body.get("context"),
         "classifyConfidence": body.get("classifyConfidence"),
-        "classifyReason":     body.get("classifyReason"),
-        "classifySource":     body.get("classifySource"),
+        "classifyReason": body.get("classifyReason"),
+        "classifySource": body.get("classifySource"),
     }
 
     if alert_reason is not None and body.get("clickConfidence") != "switch_only":
@@ -301,16 +304,52 @@ async def agent_hop(child_id: str, request: Request) -> dict:
 
     log.info(
         "Hop  %r → %r  (%r → %r)  alert=%s",
-        event["from"], event["to"],
-        event["fromTitle"], event["toTitle"],
+        event["from"],
+        event["to"],
+        event["fromTitle"],
+        event["toTitle"],
         alert_reason or "none",
     )
     return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
+# Child alert  (frontend displays the designed alert)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/agent/child-alert")
+async def agent_child_alert(request: Request) -> dict:
+    """Agent sends a child alert event for the frontend to display.
+
+    The server broadcasts this to the frontend via SSE so it can show
+    a designed alert instead of a basic popup.
+    """
+    body = await request.json()
+    child_id = body.get("childId", "")
+    if not child_id:
+        raise HTTPException(status_code=400, detail="Missing childId")
+
+    _validate_child_id(child_id)
+
+    alert_event = {
+        "type": "childAlert",
+        "childId": child_id,
+        "lureUrl": body.get("lureUrl", ""),
+        "extractedDomain": body.get("extractedDomain", ""),
+        "destination": body.get("destination", ""),
+        "timestamp": body.get("timestamp", datetime.now(timezone.utc).isoformat()),
+    }
+
+    await _broadcast(child_id, alert_event)
+    log.info("Child alert broadcast to frontend  child=%r", child_id)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
 # SSE stream  (parent dashboard)
 # ---------------------------------------------------------------------------
+
 
 @app.get("/stream/{child_id}")
 async def stream(child_id: str, request: Request) -> StreamingResponse:
@@ -361,6 +400,7 @@ async def stream(child_id: str, request: Request) -> StreamingResponse:
 # Health
 # ---------------------------------------------------------------------------
 
+
 @app.get("/health")
 def health() -> dict:
     db_ok = db.ping()
@@ -370,6 +410,7 @@ def health() -> dict:
 # ---------------------------------------------------------------------------
 # Events
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/events/{child_id}")
 def get_events(child_id: str, limit: int = 100) -> dict:
@@ -391,6 +432,7 @@ def clear_events(child_id: str) -> dict:
 # Children
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/children")
 def list_children() -> dict:
     """Return all registered children (plus any event-derived ones)."""
@@ -398,7 +440,7 @@ def list_children() -> dict:
 
 
 class RegisterChildRequest(BaseModel):
-    child_id:   Optional[str] = Field(None, alias="childId")
+    child_id: Optional[str] = Field(None, alias="childId")
     child_name: str = Field("", alias="childName")
 
     model_config = {"populate_by_name": True}
@@ -440,6 +482,7 @@ def rename_child(child_id: str, body: RenameChildRequest) -> dict:
 # Demo seed  (dev / competition demo only — not for production)
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/demo/seed")
 async def seed_demo() -> dict:
     """Inject a pre-baked demo session for childId='demo'.
@@ -453,51 +496,64 @@ async def seed_demo() -> dict:
 
     demo_hops = [
         {
-            "from": "explorer.exe",         "to": "robloxplayerbeta.exe",
-            "fromTitle": "Desktop",         "toTitle": "Roblox",
+            "from": "explorer.exe",
+            "to": "robloxplayerbeta.exe",
+            "fromTitle": "Desktop",
+            "toTitle": "Roblox",
         },
         {
-            "from": "robloxplayerbeta.exe", "to": "chrome.exe",
-            "fromTitle": "Roblox",          "toTitle": "Google Chrome",
+            "from": "robloxplayerbeta.exe",
+            "to": "chrome.exe",
+            "fromTitle": "Roblox",
+            "toTitle": "Google Chrome",
         },
         {
-            "from": "chrome.exe",           "to": "discord.exe",
-            "fromTitle": "Chrome",          "toTitle": "Discord",
-            "detection": "confirmed_hop",   "alertReason": "confirmed_hop",
+            "from": "chrome.exe",
+            "to": "discord.exe",
+            "fromTitle": "Chrome",
+            "toTitle": "Discord",
+            "detection": "confirmed_hop",
+            "alertReason": "confirmed_hop",
             "classifyConfidence": 92,
-            "classifyReason":     "discord link shared in game chat",
-            "classifySource":     "server",
-            "clickConfidence":    "app_match",
+            "classifyReason": "discord link shared in game chat",
+            "classifySource": "server",
+            "clickConfidence": "app_match",
         },
         {
-            "from": "discord.exe",          "to": "telegram.exe",
-            "fromTitle": "Discord",         "toTitle": "Telegram",
+            "from": "discord.exe",
+            "to": "telegram.exe",
+            "fromTitle": "Discord",
+            "toTitle": "Telegram",
         },
         {
-            "from": "telegram.exe",         "to": "robloxplayerbeta.exe",
-            "fromTitle": "Telegram",        "toTitle": "Roblox",
+            "from": "telegram.exe",
+            "to": "robloxplayerbeta.exe",
+            "fromTitle": "Telegram",
+            "toTitle": "Roblox",
         },
     ]
 
     inserted = []
     for i, hop in enumerate(demo_hops):
         event = {
-            "childId":            "demo",
-            "source":             "desktop",
-            "from":               hop["from"],
-            "to":                 hop["to"],
-            "fromTitle":          hop["fromTitle"],
-            "toTitle":            hop["toTitle"],
-            "timestamp":          datetime.fromtimestamp(base_time + i * 240, tz=timezone.utc).isoformat(),
-            "blocked":            False,
-            "alert":              hop.get("alertReason") is not None,
-            "alertReason":        hop.get("alertReason"),
-            "receivedAt":         datetime.now(timezone.utc).isoformat(),
-            "detection":          hop.get("detection"),
-            "clickConfidence":    hop.get("clickConfidence"),
+            "childId": "demo",
+            "source": "desktop",
+            "from": hop["from"],
+            "to": hop["to"],
+            "fromTitle": hop["fromTitle"],
+            "toTitle": hop["toTitle"],
+            "timestamp": datetime.fromtimestamp(
+                base_time + i * 240, tz=timezone.utc
+            ).isoformat(),
+            "blocked": False,
+            "alert": hop.get("alertReason") is not None,
+            "alertReason": hop.get("alertReason"),
+            "receivedAt": datetime.now(timezone.utc).isoformat(),
+            "detection": hop.get("detection"),
+            "clickConfidence": hop.get("clickConfidence"),
             "classifyConfidence": hop.get("classifyConfidence"),
-            "classifyReason":     hop.get("classifyReason"),
-            "classifySource":     hop.get("classifySource"),
+            "classifyReason": hop.get("classifyReason"),
+            "classifySource": hop.get("classifySource"),
         }
         if event["alertReason"] is not None:
             db.insert_event(event)
@@ -514,7 +570,8 @@ async def seed_demo() -> dict:
 if __name__ == "__main__":
     log.info(
         "Starting HopMap server on %s:%d",
-        server_config.host, server_config.port,
+        server_config.host,
+        server_config.port,
     )
     try:
         uvicorn.run(
