@@ -64,6 +64,7 @@ import re
 import shutil
 import threading
 import time
+import winreg
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -80,127 +81,6 @@ import win32process
 from PIL import Image
 
 from config import agent_config
-
-# ---------------------------------------------------------------------------
-# Platform & Process Database (Excel-based)
-# ---------------------------------------------------------------------------
-# Load platform→process mappings from an Excel file to avoid hardcoding.
-# The Excel file should have columns: "platform", "process"
-# Set PLATFORMS_DB_PATH in .env to point to your Excel file.
-
-_PLATFORM_APP_MAP: dict[str, frozenset[str]] = {}
-_BROWSER_PROCESSES: frozenset[str] = frozenset()
-_TRANSIT_PROCESSES: frozenset[str] = frozenset()
-
-
-def _load_platform_db() -> None:
-    """
-    Load platform mappings, browser processes, and transit processes from Excel.
-
-    Expected Excel format (sheet named "platforms" or first sheet):
-        - Column "platform": keyword (e.g. "discord", "telegram")
-        - Column "process":    process name (e.g. "discord.exe")
-        - Multiple rows allowed per platform (multiple processes)
-
-    For browsers and transit processes, use these exact platform names:
-        - "browser"     → browser process names
-        - "transit"     → transient shell processes during app launch
-
-    REQUIRED: PLATFORMS_DB_PATH must be set in .env and file must exist.
-    If not configured, the agent will NOT start (logs error and exits).
-    """
-    global _PLATFORM_APP_MAP, _BROWSER_PROCESSES, _TRANSIT_PROCESSES
-
-    excel_path = agent_config.platforms_db_path
-
-    if not excel_path:
-        log.error("PLATFORMS_DB_PATH not configured in .env - cannot start agent")
-        raise RuntimeError("PLATFORMS_DB_PATH is required but not set in .env")
-
-    if not pathlib.Path(excel_path).exists():
-        log.error("Platforms database file not found: %s", excel_path)
-        raise RuntimeError(f"Platforms DB file not found: {excel_path}")
-
-    try:
-        import openpyxl
-
-        workbook = openpyxl.load_workbook(excel_path, read_only=True)
-        worksheet = workbook.active
-
-        # Find columns
-        platform_col = None
-        process_col = None
-
-        for cell in worksheet[1]:
-            if cell.value:
-                col_name = str(cell.value).strip().lower()
-                if col_name == "platform":
-                    platform_col = cell.column - 1
-                elif col_name == "process":
-                    process_col = cell.column - 1
-
-        if platform_col is None or process_col is None:
-            log.error("Excel file missing 'platform' or 'process' column")
-            raise RuntimeError("Excel file must have 'platform' and 'process' columns")
-
-        # Temporary storage
-        platforms: dict[str, set[str]] = {}
-        browsers: set[str] = set()
-        transits: set[str] = set()
-
-        for row in worksheet.iter_rows(min_row=2, values_only=True):
-            if not row:
-                continue
-            platform_val = row[platform_col] if platform_col < len(row) else None
-            process_val = row[process_col] if process_col < len(row) else None
-
-            if not platform_val or not process_val:
-                continue
-
-            platform_name = str(platform_val).strip().lower()
-            process_name = str(process_val).strip().lower()
-
-            if not platform_name or not process_name:
-                continue
-
-            # Special platform names
-            if platform_name == "browser":
-                browsers.add(process_name)
-            elif platform_name == "transit":
-                transits.add(process_name)
-            else:
-                # Regular platform mapping
-                if platform_name not in platforms:
-                    platforms[platform_name] = set()
-                platforms[platform_name].add(process_name)
-
-        workbook.close()
-
-        # Validate at least some data was loaded
-        if not platforms:
-            log.error("No platform mappings found in Excel file")
-            raise RuntimeError("Excel file contains no valid platform mappings")
-
-        # Convert to frozensets
-        _PLATFORM_APP_MAP = {k: frozenset(v) for k, v in platforms.items()}
-        _BROWSER_PROCESSES = frozenset(browsers) if browsers else frozenset()
-        _TRANSIT_PROCESSES = frozenset(transits) if transits else frozenset()
-
-        log.info(
-            "Loaded %d platforms, %d browsers, %d transit processes from %s",
-            len(_PLATFORM_APP_MAP),
-            len(_BROWSER_PROCESSES),
-            len(_TRANSIT_PROCESSES),
-            excel_path,
-        )
-
-    except RuntimeError:
-        # Re-raise RuntimeError to stop agent startup
-        raise
-    except Exception as e:
-        log.error("Failed to load platforms database: %s", e)
-        raise RuntimeError(f"Failed to load platforms DB: {e}")
-
 
 # ---------------------------------------------------------------------------
 # Tesseract auto-detection  (used only by the local Ollama fallback path)
@@ -226,8 +106,8 @@ _configure_tesseract()
 # Configuration
 # ---------------------------------------------------------------------------
 
-BACKEND_URL = agent_config.backend_url
-CHILD_ID: str = ""  # assigned by the server on startup
+BACKEND_URL   = agent_config.backend_url
+CHILD_ID: str = ""   # assigned by the server on startup
 SCAN_INTERVAL = agent_config.scan_interval_seconds
 CONTEXT_LINES = agent_config.context_lines
 
@@ -277,7 +157,6 @@ def _register_child() -> str:
         log.warning("Could not reach server for registration: %s", exc)
         return "child-unknown"
 
-
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -292,36 +171,129 @@ log.propagate = False
 if not log.handlers:
     _handler = logging.StreamHandler()
     _handler.setFormatter(
-        logging.Formatter(
-            "[%(asctime)s] %(levelname)s  %(message)s", datefmt="%H:%M:%S"
-        )
+        logging.Formatter("[%(asctime)s] %(levelname)s  %(message)s", datefmt="%H:%M:%S")
     )
     log.addHandler(_handler)
 
 # ---------------------------------------------------------------------------
 # Game-process registry
 # ---------------------------------------------------------------------------
+# Layer 1 — Windows Game Mode registry (dynamic, authoritative).
+# Layer 2 — Epic Games manifests (catches installs before first launch).
+# Layer 3 — Hardcoded fallback (top games, covers Game Mode disabled edge case).
 
-_GAME_PROCESSES: frozenset[str] = frozenset(
-    {
-        "robloxplayerbeta.exe",
-        "roblox.exe",
-        "minecraft.exe",
-        "minecraftlauncher.exe",
-        "javaw.exe",  # Minecraft Java Edition
-        "fortnite.exe",
-        "steam.exe",
-        "steamwebhelper.exe",
-        "leagueclient.exe",
-        "league of legends.exe",
-        "valorant.exe",
-        "gta5.exe",
-    }
+_GAME_PROCESSES_FALLBACK: frozenset[str] = frozenset({
+    "robloxplayerbeta.exe", "roblox.exe",
+    "minecraft.exe", "minecraftlauncher.exe",
+    "javaw.exe",            # Minecraft Java Edition
+    "fortnite.exe",
+    "steam.exe", "steamwebhelper.exe",
+    "leagueclient.exe", "league of legends.exe",
+    "valorant.exe",
+    "gta5.exe",
+})
+
+# Cache state — refreshed every _GAME_CACHE_TTL seconds.
+_game_processes_cache:    frozenset[str] = frozenset()
+_game_cache_updated_at:   float          = 0.0
+_game_cache_lock:         threading.Lock = threading.Lock()
+_GAME_CACHE_TTL:          float          = 60.0
+
+# Epic Games manifest directory (Windows default).
+_EPIC_MANIFESTS_DIR = pathlib.Path(
+    r"C:\ProgramData\Epic\EpicGamesLauncher\Data\Manifests"
 )
 
 
+def _load_from_registry() -> set[str]:
+    """Return exe basenames registered in the Windows Game Mode registry.
+
+    Reads ``HKEY_CURRENT_USER\\System\\GameConfigStore\\Children``.  Each
+    sub-key that has a ``MatchedExeFullPath`` value represents a game Windows
+    has detected via DirectX/Vulkan/OpenGL initialisation.
+
+    Returns an empty set silently when the key is absent (Game Mode disabled).
+    """
+    exes: set[str] = set()
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"System\GameConfigStore\Children",
+        ) as parent:
+            index = 0
+            while True:
+                try:
+                    child_name = winreg.EnumKey(parent, index)
+                    index += 1
+                except OSError:
+                    break  # no more sub-keys
+                try:
+                    with winreg.OpenKey(parent, child_name) as child:
+                        value, _ = winreg.QueryValueEx(child, "MatchedExeFullPath")
+                        exes.add(pathlib.Path(value).name.lower())
+                except OSError:
+                    continue  # sub-key has no MatchedExeFullPath — skip
+    except OSError:
+        pass  # registry key absent — Game Mode disabled or unsupported OS
+    return exes
+
+
+def _load_from_epic() -> set[str]:
+    """Return exe basenames from locally installed Epic Games titles.
+
+    Scans ``*.item`` manifest files written by the Epic Games Launcher.  Each
+    file is JSON and contains a ``LaunchExecutable`` field with a relative path
+    to the game's main executable (e.g. ``"FortniteGame/Binaries/Win64/FortniteLauncher.exe"``).
+
+    Returns an empty set silently when Epic is not installed.
+    """
+    exes: set[str] = set()
+    try:
+        for manifest in _EPIC_MANIFESTS_DIR.glob("*.item"):
+            try:
+                data = json.loads(manifest.read_text(encoding="utf-8"))
+                launch_exe = data.get("LaunchExecutable", "")
+                if launch_exe:
+                    exes.add(pathlib.Path(launch_exe).name.lower())
+            except (json.JSONDecodeError, OSError, ValueError):
+                continue  # malformed manifest — skip
+    except OSError:
+        pass  # Epic not installed
+    return exes
+
+
+def _load_game_processes() -> frozenset[str]:
+    """Union all three detection layers into a single frozenset of exe basenames."""
+    return frozenset(
+        _load_from_registry()
+        | _load_from_epic()
+        | _GAME_PROCESSES_FALLBACK
+    )
+
+
 def _is_game(proc_name: str) -> bool:
-    return proc_name.lower() in _GAME_PROCESSES
+    """Return True when *proc_name* belongs to a known game process.
+
+    Uses a 60-second TTL cache so the registry and Epic manifests are not
+    read on every foreground-change event, while still picking up newly
+    installed or launched games without an agent restart.
+    """
+    global _game_processes_cache, _game_cache_updated_at
+
+    now = time.monotonic()
+    if now - _game_cache_updated_at > _GAME_CACHE_TTL:
+        with _game_cache_lock:
+            # Double-checked locking: another thread may have refreshed while
+            # we were waiting to acquire the lock.
+            if now - _game_cache_updated_at > _GAME_CACHE_TTL:
+                _game_processes_cache  = _load_game_processes()
+                _game_cache_updated_at = time.monotonic()
+                log.debug(
+                    "Game-process cache refreshed (%d entries).",
+                    len(_game_processes_cache),
+                )
+
+    return proc_name.lower() in _game_processes_cache
 
 
 # ---------------------------------------------------------------------------
@@ -333,41 +305,33 @@ def _is_game(proc_name: str) -> bool:
 # browser-title poll (tier 2).
 
 _PLATFORM_APP_MAP: dict[str, frozenset[str]] = {
-    "discord": frozenset({"discord.exe"}),
-    "telegram": frozenset({"telegram.exe", "telegramdesktop.exe"}),
-    "whatsapp": frozenset({"whatsapp.exe", "whatsapp.root.exe"}),
-    "signal": frozenset({"signal.exe"}),
-    "snapchat": frozenset({"snapchat.exe"}),
-    "instagram": frozenset(),  # web / mobile only on desktop
-    "tiktok": frozenset(),
-    "youtube": frozenset(),
-    "twitch": frozenset(),
+    "discord":   frozenset({"discord.exe"}),
+    "telegram":  frozenset({"telegram.exe", "telegramdesktop.exe"}),
+    "whatsapp":  frozenset({"whatsapp.exe", "whatsapp.root.exe"}),
+    "signal":    frozenset({"signal.exe"}),
+    "snapchat":  frozenset({"snapchat.exe"}),
+    "instagram": frozenset(),   # web / mobile only on desktop
+    "tiktok":    frozenset(),
+    "youtube":   frozenset(),
+    "twitch":    frozenset(),
 }
 
-_BROWSER_PROCESSES: frozenset[str] = frozenset(
-    {
-        "chrome.exe",
-        "msedge.exe",
-        "firefox.exe",
-        "opera.exe",
-        "brave.exe",
-        "vivaldi.exe",
-    }
-)
+_BROWSER_PROCESSES: frozenset[str] = frozenset({
+    "chrome.exe", "msedge.exe", "firefox.exe",
+    "opera.exe", "brave.exe", "vivaldi.exe",
+})
 
 # Shell and taskbar processes that appear transiently during an app launch.
 # We skip these when deciding whether a pending hop has been confirmed and
 # wait for the real destination process to reach the foreground.
-_TRANSIT_PROCESSES: frozenset[str] = frozenset(
-    {
-        "explorer.exe",
-        "searchhost.exe",
-        "searchapp.exe",
-        "shellexperiencehost.exe",
-        "startmenuexperiencehost.exe",
-        "applicationframehost.exe",
-    }
-)
+_TRANSIT_PROCESSES: frozenset[str] = frozenset({
+    "explorer.exe",
+    "searchhost.exe",
+    "searchapp.exe",
+    "shellexperiencehost.exe",
+    "startmenuexperiencehost.exe",
+    "applicationframehost.exe",
+})
 
 # ---------------------------------------------------------------------------
 # URL utilities
@@ -377,7 +341,7 @@ _TRANSIT_PROCESSES: frozenset[str] = frozenset(
 # "discord.gg/abc" or "t.me/xyz".  Requiring at least one slash after the TLD
 # prevents bare process names like "discord.exe" from matching.
 _URL_RE = re.compile(
-    r"https?://[^\s\"'<>]+"  # full https / http URL
+    r"https?://[^\s\"'<>]+"           # full https / http URL
     r"|[a-z0-9\-]+\.[a-z]{2,}/\S+",  # bare domain/path  e.g. discord.gg/abc
     re.IGNORECASE,
 )
@@ -411,14 +375,13 @@ def _app_matches_url(url: str, proc: str) -> bool:
 # Context extraction
 # ---------------------------------------------------------------------------
 
-
 def _extract_context(text: str, url: str, n: int = CONTEXT_LINES) -> str:
     """Return up to *n* lines centred on the line that contains *url*."""
     lines = text.splitlines()
     for i, line in enumerate(lines):
         if url in line:
             start = max(0, i - n // 2)
-            end = min(len(lines), start + n)
+            end   = min(len(lines), start + n)
             return "\n".join(lines[start:end])
     return url  # fallback: just the URL itself
 
@@ -426,7 +389,6 @@ def _extract_context(text: str, url: str, n: int = CONTEXT_LINES) -> str:
 # ---------------------------------------------------------------------------
 # TTL de-duplication cache
 # ---------------------------------------------------------------------------
-
 
 class _TTLCache:
     """Bounded, time-expiring membership set.  Thread-safe.
@@ -437,10 +399,10 @@ class _TTLCache:
     """
 
     def __init__(self, ttl_seconds: int = 300, max_size: int = 500) -> None:
-        self._ttl = ttl_seconds
-        self._max = max_size
+        self._ttl   = ttl_seconds
+        self._max   = max_size
         self._store: OrderedDict[str, float] = OrderedDict()
-        self._lock = threading.Lock()
+        self._lock  = threading.Lock()
 
     def seen(self, key: str) -> bool:
         now = time.monotonic()
@@ -473,19 +435,17 @@ _url_seen_global: _TTLCache = _TTLCache(ttl_seconds=300)
 # Classification result
 # ---------------------------------------------------------------------------
 
-
 @dataclass(frozen=True)
 class _ClassifyResult:
-    is_hop: bool
-    confidence: int  # 0–100
-    reason: str
-    via: str  # "server" | "error"
+    is_hop:     bool
+    confidence: int    # 0–100
+    reason:     str
+    via:        str    # "server" | "error"
 
 
 # ---------------------------------------------------------------------------
 # Classifier  (delegates entirely to the HopMap server)
 # ---------------------------------------------------------------------------
-
 
 def _classify(url: str, context: str, detection_source: str) -> _ClassifyResult:
     """POST a classify request to the HopMap server and return a structured result.
@@ -499,9 +459,9 @@ def _classify(url: str, context: str, detection_source: str) -> _ClassifyResult:
     """
     payload = {
         "childId": CHILD_ID,
-        "url": url,
+        "url":     url,
         "context": context,
-        "source": detection_source,
+        "source":  detection_source,
     }
 
     try:
@@ -511,17 +471,14 @@ def _classify(url: str, context: str, detection_source: str) -> _ClassifyResult:
             timeout=8,
         )
         resp.raise_for_status()
-        data = resp.json()
-        decision = str(data.get("decision", "NO")).upper()
+        data       = resp.json()
+        decision   = str(data.get("decision", "NO")).upper()
         confidence = max(0, min(100, int(data.get("confidence", 0))))
-        reason = str(data.get("reason", "")).strip()
+        reason     = str(data.get("reason", "")).strip()
 
         log.debug(
             "Classify → %s  %d%%  %r  (%s)",
-            decision,
-            confidence,
-            reason,
-            url,
+            decision, confidence, reason, url,
         )
         return _ClassifyResult(decision.startswith("YES"), confidence, reason, "server")
 
@@ -533,7 +490,6 @@ def _classify(url: str, context: str, detection_source: str) -> _ClassifyResult:
 # ---------------------------------------------------------------------------
 # Window helpers
 # ---------------------------------------------------------------------------
-
 
 def _resolve_window(hwnd: int) -> tuple[str, str]:
     """Return *(proc_name_lower, window_title)* for *hwnd*."""
@@ -564,7 +520,6 @@ def _hwnd_rect(hwnd: int) -> Optional[tuple[int, int, int, int]]:
 # OCR
 # ---------------------------------------------------------------------------
 
-
 def _ocr_window(hwnd: int) -> str:
     """Screenshot *hwnd* and return all Tesseract-extracted text."""
     region = _hwnd_rect(hwnd)
@@ -591,7 +546,7 @@ def _sender_loop() -> None:
     """Drain *_send_queue* and POST each hop event to the backend."""
     while True:
         event = _send_queue.get()
-        if event is None:  # shutdown sentinel
+        if event is None:   # shutdown sentinel
             return
         try:
             resp = requests.post(
@@ -616,7 +571,7 @@ def _enqueue_hop(event: dict) -> None:
 # Keyed by URL so that simultaneous lures from different links are tracked
 # independently.  All mutations must be performed while holding *_pending_lock*.
 
-_pending_lock = threading.Lock()
+_pending_lock         = threading.Lock()
 _pending_hop_attempts: dict[str, dict] = {}
 
 # ---------------------------------------------------------------------------
@@ -638,8 +593,8 @@ _pending_hop_attempts: dict[str, dict] = {}
 #
 # All mutations must be performed while holding *_last_switch_lock*.
 
-_last_switch_lock = threading.Lock()
-_last_non_game_switch: Optional[dict] = None  # { proc, title, hwnd, at }
+_last_switch_lock      = threading.Lock()
+_last_non_game_switch: Optional[dict] = None   # { proc, title, hwnd, at }
 
 # Maximum age (seconds) of a recorded switch that _try_late_confirm will
 # still act on.  Prevents a switch from many minutes ago being incorrectly
@@ -659,12 +614,11 @@ _current_game: Optional[tuple[str, str]] = None
 # Click-confidence: browser title poll  (tier 2)
 # ---------------------------------------------------------------------------
 
-
 def _poll_browser_title(
-    hwnd: int,
-    domain: str,
-    event: dict,
-    timeout: float = 10.0,
+    hwnd:     int,
+    domain:   str,
+    event:    dict,
+    timeout:  float = 10.0,
     interval: float = 0.5,
 ) -> None:
     """Poll the browser window title for *domain*; fire _enqueue_hop when found.
@@ -692,20 +646,19 @@ def _poll_browser_title(
 # Hop confirmation
 # ---------------------------------------------------------------------------
 
-
 def _confirm_pending(
     pending: dict,
-    proc: str,
-    title: str,
-    hwnd: int,
+    proc:    str,
+    title:   str,
+    hwnd:    int,
 ) -> None:
     """Apply click-confidence logic and dispatch the confirmed hop event."""
-    lure_url = pending["to"]
+    lure_url   = pending["to"]
     base_event = {
         **pending,
-        "confirmedTo": proc,
+        "confirmedTo":      proc,
         "confirmedToTitle": title,
-        "confirmedAt": datetime.now(tz=timezone.utc).isoformat(),
+        "confirmedAt":      datetime.now(tz=timezone.utc).isoformat(),
     }
 
     if _app_matches_url(lure_url, proc):
@@ -730,7 +683,6 @@ def _confirm_pending(
 # ---------------------------------------------------------------------------
 # Late-confirm helper
 # ---------------------------------------------------------------------------
-
 
 def _drain_and_confirm(proc: str, title: str, hwnd: int) -> None:
     """Atomically drain *_pending_hop_attempts* and confirm each lure against
@@ -789,8 +741,7 @@ def _try_late_confirm(game_proc: str) -> None:
     if last and age <= _LATE_CONFIRM_MAX_AGE and _is_hop_destination(last["proc"]):
         log.warning(
             "CONFIRMED hop (late, switch to %r happened %.1fs ago).",
-            last["proc"],
-            age,
+            last["proc"], age,
         )
         _drain_and_confirm(last["proc"], last["title"], last["hwnd"])
         return
@@ -816,12 +767,11 @@ def _try_late_confirm(game_proc: str) -> None:
 # Classify-and-park dispatcher
 # ---------------------------------------------------------------------------
 
-
 def _decide_and_send(
-    url: str,
-    context: str,
-    game_proc: str,
-    game_title: str,
+    url:              str,
+    context:          str,
+    game_proc:        str,
+    game_title:       str,
     detection_source: str,
 ) -> None:
     """Classify *url* via the server (or fallback); park a pending hop on YES.
@@ -834,30 +784,26 @@ def _decide_and_send(
     if not result.is_hop:
         log.debug(
             "Safe  %d%%  %r  (%s).",
-            result.confidence,
-            result.reason,
-            url,
+            result.confidence, result.reason, url,
         )
         return
 
     log.warning(
         "⚠ Hop attempt  %r  — %s (%d%% confidence).  Watching for app switch…",
-        url,
-        result.reason,
-        result.confidence,
+        url, result.reason, result.confidence,
     )
 
     pending: dict = {
-        "from": game_proc,
-        "to": url,
-        "fromTitle": game_title,
-        "toTitle": f"[link] {url}",
-        "context": context,
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-        "detection": "confirmed_hop",
+        "from":               game_proc,
+        "to":                 url,
+        "fromTitle":          game_title,
+        "toTitle":            f"[link] {url}",
+        "context":            context,
+        "timestamp":          datetime.now(tz=timezone.utc).isoformat(),
+        "detection":          "confirmed_hop",
         "classifyConfidence": result.confidence,
-        "classifyReason": result.reason,
-        "classifySource": result.via,
+        "classifyReason":     result.reason,
+        "classifySource":     result.via,
     }
 
     with _pending_lock:
@@ -874,10 +820,10 @@ _current_scanner_stop: Optional[threading.Event] = None
 
 
 def _scanner_loop(
-    hwnd: int,
-    game_proc: str,
+    hwnd:       int,
+    game_proc:  str,
     game_title: str,
-    stop: threading.Event,
+    stop:       threading.Event,
 ) -> None:
     """Periodically OCR the game window and classify every new URL found."""
     log.info("Monitoring game: %s", game_proc)
@@ -920,7 +866,6 @@ def _scanner_loop(
 # Clipboard monitor
 # ---------------------------------------------------------------------------
 
-
 def _clipboard_monitor_loop(stop: threading.Event) -> None:
     """Poll the system clipboard every second for hop-luring URLs.
 
@@ -955,13 +900,7 @@ def _clipboard_monitor_loop(stop: threading.Event) -> None:
                 log.info("Link in clipboard: %s", url)
                 threading.Thread(
                     target=_decide_and_send,
-                    args=(
-                        url,
-                        f"[clipboard] {url}",
-                        game_proc,
-                        game_title,
-                        "clipboard",
-                    ),
+                    args=(url, f"[clipboard] {url}", game_proc, game_title, "clipboard"),
                     daemon=True,
                     name="classify-dispatch",
                 ).start()
@@ -976,7 +915,7 @@ def _clipboard_monitor_loop(stop: threading.Event) -> None:
 _user32 = ctypes.windll.user32
 
 EVENT_SYSTEM_FOREGROUND = 0x0003
-WINEVENT_OUTOFCONTEXT = 0x0000
+WINEVENT_OUTOFCONTEXT   = 0x0000
 
 _WinEventProc = ctypes.WINFUNCTYPE(
     None,
@@ -1001,13 +940,13 @@ _hwnd_event_queue: queue.Queue[Optional[int]] = queue.Queue()
 
 
 def _on_foreground_change(
-    hWinEventHook,  # noqa: N803  — Win32 naming convention
+    hWinEventHook,   # noqa: N803  — Win32 naming convention
     event,
     hwnd,
-    idObject,  # noqa: N803
-    idChild,  # noqa: N803
-    dwEventThread,  # noqa: N803
-    dwmsEventTime,  # noqa: N803
+    idObject,        # noqa: N803
+    idChild,         # noqa: N803
+    dwEventThread,   # noqa: N803
+    dwmsEventTime,   # noqa: N803
 ) -> None:
     """Win32 event callback — MUST return immediately.  Enqueues HWND only."""
     if hwnd:
@@ -1018,8 +957,8 @@ def _on_foreground_change(
 # Event processor
 # ---------------------------------------------------------------------------
 
-_prev_proc: str = ""
-_prev_title: str = ""
+_prev_proc:      str                        = ""
+_prev_title:     str                        = ""
 _scanner_thread: Optional[threading.Thread] = None
 
 
@@ -1030,13 +969,7 @@ def _process_foreground_change(hwnd: int) -> None:
     thread — no additional locking is needed for the module-level _prev_proc /
     _prev_title / scanner state.
     """
-    global \
-        _prev_proc, \
-        _prev_title, \
-        _scanner_thread, \
-        _current_scanner_stop, \
-        _current_game, \
-        _last_non_game_switch
+    global _prev_proc, _prev_title, _scanner_thread, _current_scanner_stop, _current_game, _last_non_game_switch
 
     proc, title = _resolve_window(hwnd)
     if proc == _prev_proc:
@@ -1044,8 +977,7 @@ def _process_foreground_change(hwnd: int) -> None:
 
     log.debug(
         "App switch: %s → %s",
-        _prev_proc,
-        proc,
+        _prev_proc, proc,
     )
 
     # ------------------------------------------------------------------
@@ -1072,10 +1004,10 @@ def _process_foreground_change(hwnd: int) -> None:
     if not _is_game(proc) and proc not in _TRANSIT_PROCESSES:
         with _last_switch_lock:
             _last_non_game_switch = {
-                "proc": proc,
+                "proc":  proc,
                 "title": title,
-                "hwnd": hwnd,
-                "at": time.monotonic(),
+                "hwnd":  hwnd,
+                "at":    time.monotonic(),
             }
 
     # ------------------------------------------------------------------
@@ -1091,7 +1023,7 @@ def _process_foreground_change(hwnd: int) -> None:
     # Start a new scanner on game entry; record a plain hop otherwise
     # ------------------------------------------------------------------
     if _is_game(proc):
-        _current_game = (proc, title)  # clipboard monitor may now classify
+        _current_game = (proc, title)   # clipboard monitor may now classify
         stop = threading.Event()
         _current_scanner_stop = stop
         _scanner_thread = threading.Thread(
@@ -1102,24 +1034,22 @@ def _process_foreground_change(hwnd: int) -> None:
         )
         _scanner_thread.start()
     else:
-        _current_game = None  # clipboard monitor stops classifying
+        _current_game = None            # clipboard monitor stops classifying
         # Skip transit shells — they are intermediate steps, not real
         # destinations, and posting them is pure noise.
         # Only report this plain switch when leaving a game.
         # Non-game-to-non-game switches (e.g. discord → code) are noise.
         if proc not in _TRANSIT_PROCESSES and _is_game(_prev_proc):
-            _enqueue_hop(
-                {
-                    "from": _prev_proc,
-                    "to": proc,
-                    "fromTitle": _prev_title,
-                    "toTitle": title,
-                    "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-                    "detection": "foreground_hook",
-                }
-            )
+            _enqueue_hop({
+                "from":      _prev_proc,
+                "to":        proc,
+                "fromTitle": _prev_title,
+                "toTitle":   title,
+                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                "detection": "foreground_hook",
+            })
 
-    _prev_proc = proc
+    _prev_proc  = proc
     _prev_title = title
 
 
@@ -1127,7 +1057,7 @@ def _event_processor_loop() -> None:
     """Drain *_hwnd_event_queue* and dispatch each HWND to the handler."""
     while True:
         hwnd = _hwnd_event_queue.get()
-        if hwnd is None:  # shutdown sentinel
+        if hwnd is None:    # shutdown sentinel
             return
         try:
             _process_foreground_change(hwnd)
@@ -1139,20 +1069,18 @@ def _event_processor_loop() -> None:
 # Entry point
 # ---------------------------------------------------------------------------
 
-
 def run() -> None:
     """Start all background threads, register the Win32 hook, and pump the
     Windows message loop until Ctrl-C is pressed."""
     global _prev_proc, _prev_title, _current_scanner_stop, _current_game
 
-    # Load platform mappings from Excel (or use hardcoded defaults)
-    _load_platform_db()
-
-    initial_hwnd = win32gui.GetForegroundWindow()
+    initial_hwnd            = win32gui.GetForegroundWindow()
     _prev_proc, _prev_title = _resolve_window(initial_hwnd)
 
     # ── Background threads ────────────────────────────────────────────────
-    threading.Thread(target=_sender_loop, daemon=True, name="hop-sender").start()
+    threading.Thread(
+        target=_sender_loop, daemon=True, name="hop-sender"
+    ).start()
     threading.Thread(
         target=_event_processor_loop, daemon=True, name="event-processor"
     ).start()
@@ -1168,13 +1096,8 @@ def run() -> None:
     # ── Win32 event hook ──────────────────────────────────────────────────
     hook_proc = _WinEventProc(_on_foreground_change)
     hook = _user32.SetWinEventHook(
-        EVENT_SYSTEM_FOREGROUND,
-        EVENT_SYSTEM_FOREGROUND,
-        0,
-        hook_proc,
-        0,
-        0,
-        WINEVENT_OUTOFCONTEXT,
+        EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+        0, hook_proc, 0, 0, WINEVENT_OUTOFCONTEXT,
     )
     if not hook:
         log.error("SetWinEventHook failed — aborting.")
@@ -1205,7 +1128,7 @@ def run() -> None:
     # ── Windows message loop ──────────────────────────────────────────────
     # PeekMessageW + a 100 ms sleep keeps CPU usage near zero while allowing
     # the Win32 hook to fire reliably for every foreground change.
-    msg = ctypes.wintypes.MSG()
+    msg       = ctypes.wintypes.MSG()
     PM_REMOVE = 0x0001
 
     try:
@@ -1221,7 +1144,7 @@ def run() -> None:
             _current_scanner_stop.set()
         clipboard_stop.set()
         _user32.UnhookWinEvent(hook)
-        _send_queue.put(None)  # hop-sender sentinel
+        _send_queue.put(None)        # hop-sender sentinel
         _hwnd_event_queue.put(None)  # event-processor sentinel
 
 
