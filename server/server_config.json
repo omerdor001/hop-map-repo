@@ -1,0 +1,18 @@
+{
+  "network": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "cors_origins": ["*"]
+  },
+  "db": {
+    "db_name": "hopmap",
+    "events_collection": "events",
+    "rules_collection": "rules",
+    "words_collection": "words",
+    "words_refresh_interval_seconds": 3600
+  },
+  "llm": {
+    "provider": "ollama",
+    "model": "qwen2.5:7b"
+  }
+}

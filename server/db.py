@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pymongo import MongoClient, DESCENDING
 from pymongo.collection import Collection
 from pymongo.errors import ConnectionFailure, PyMongoError
-from config import server_config
+from config import config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -63,15 +63,19 @@ class DatabasePool:
             self._db = None
 
 
-_pool = DatabasePool(server_config.mongo_uri, server_config.db_name)
+_pool = DatabasePool(config_manager.db.mongo_uri, config_manager.db.db_name)
 
 
 def _col_events() -> Collection:
-    return _pool.get_collection(server_config.events_collection)
+    return _pool.get_collection(config_manager.db.events_collection)
 
 
 def _col_children() -> Collection:
     return _pool.get_collection("children")
+
+
+def _col_words() -> Collection:
+    return _pool.get_collection(config_manager.db.words_collection)
 
 
 def initialize_indexes() -> None:
@@ -79,6 +83,7 @@ def initialize_indexes() -> None:
     try:
         _col_events().create_index([("childId", 1), ("timestamp", DESCENDING)])
         _col_children().create_index("childId", unique=True)
+        _col_words().create_index("word", unique=True)
         logger.info("MongoDB indexes ensured")
     except (RuntimeError, PyMongoError) as e:
         logger.warning("Could not create indexes: %s", e)
@@ -138,4 +143,81 @@ def get_children() -> list[dict]:
     for cid in _col_events().distinct("childId"):
         registered.setdefault(cid, cid)
     return [{"childId": cid, "childName": name} for cid, name in sorted(registered.items())]
+
+
+# ---------------------------------------------------------------------------
+# Blocked words
+# ---------------------------------------------------------------------------
+
+def get_blocked_words() -> set[str]:
+    """Return the full blocked-words set from MongoDB."""
+    return {doc["word"] for doc in _col_words().find({}, {"_id": 0, "word": 1})}
+
+
+def add_word(word: str) -> bool:
+    """Upsert a blocked word. Returns True if the word was newly inserted."""
+    from pymongo.errors import DuplicateKeyError
+    try:
+        _col_words().insert_one({"word": word, "addedAt": datetime.now(timezone.utc).isoformat()})
+        return True
+    except DuplicateKeyError:
+        return False
+
+
+def remove_word(word: str) -> bool:
+    """Delete a blocked word. Returns True if it existed."""
+    result = _col_words().delete_one({"word": word})
+    return result.deleted_count > 0
+
+
+def seed_words_from_excel(path: str) -> int:
+    """Bulk-upsert words from an Excel file (column: 'word') into MongoDB.
+
+    Safe to call multiple times — uses upsert so existing words are ignored.
+    Returns the number of words processed (not just newly inserted).
+    """
+    import os
+    import openpyxl
+    from pymongo import UpdateOne
+
+    if not os.path.exists(path):
+        logger.warning("seed_words_from_excel: file not found at %r", path)
+        return 0
+
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True)
+        ws = wb.active
+
+        word_col_idx = None
+        for cell in ws[1]:
+            if cell.value and str(cell.value).strip().lower() == "word":
+                word_col_idx = cell.column - 1
+                break
+
+        if word_col_idx is None:
+            logger.warning("seed_words_from_excel: no 'word' column found in %r", path)
+            wb.close()
+            return 0
+
+        ops = []
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if row and row[word_col_idx]:
+                w = str(row[word_col_idx]).strip().lower()
+                if w:
+                    ops.append(UpdateOne(
+                        {"word": w},
+                        {"$setOnInsert": {"word": w, "addedAt": datetime.now(timezone.utc).isoformat()}},
+                        upsert=True,
+                    ))
+        wb.close()
+
+        if ops:
+            _col_words().bulk_write(ops, ordered=False)
+
+        logger.info("seed_words_from_excel: processed %d words from %r", len(ops), path)
+        return len(ops)
+
+    except Exception as exc:
+        logger.warning("seed_words_from_excel failed: %s", exc)
+        return 0
 
