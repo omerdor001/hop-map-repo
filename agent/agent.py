@@ -58,6 +58,7 @@ import ctypes
 import ctypes.wintypes
 import json
 import logging
+import os
 import pathlib
 import queue
 import re
@@ -272,10 +273,10 @@ if not log.handlers:
 # Game-process registry
 # ---------------------------------------------------------------------------
 # Layer 1 — Windows Game Mode registry (dynamic, authoritative).
-# Layer 2 — Epic Games manifests (catches installs before first launch).
+# Layer 2 — Launcher manifests: Epic Games + Riot Games (catches installs before first launch).
 # Layer 3 — Hardcoded fallback (top games, covers Game Mode disabled edge case).
 
-_GAME_PROCESSES: frozenset[str] = frozenset({
+_GAME_PROCESSES_FALLBACK: frozenset[str] = frozenset({
     "robloxplayerbeta.exe", "roblox.exe",
     "minecraft.exe", "minecraftlauncher.exe",
     "javaw.exe",            # Minecraft Java Edition
@@ -292,10 +293,16 @@ _game_cache_updated_at:   float          = 0.0
 _game_cache_lock:         threading.Lock = threading.Lock()
 _GAME_CACHE_TTL:          float          = 60.0
 
+# Base path for per-machine application data; respects %PROGRAMDATA% redirects.
+_PROGRAMDATA = pathlib.Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData"))
+
 # Epic Games manifest directory (Windows default).
-_EPIC_MANIFESTS_DIR = pathlib.Path(
-    r"C:\ProgramData\Epic\EpicGamesLauncher\Data\Manifests"
-)
+_EPIC_MANIFESTS_DIR = _PROGRAMDATA / "Epic" / "EpicGamesLauncher" / "Data" / "Manifests"
+
+# Riot Games metadata directory (Windows default).
+# Each subdirectory is a product (e.g. live-valorant-win, live-league_of_legends-win)
+# and contains a <product>.product_settings.yaml with an "exe_name" field.
+_RIOT_METADATA_DIR = _PROGRAMDATA / "Riot Games" / "Metadata"
 
 
 def _load_from_registry() -> set[str]:
@@ -355,11 +362,44 @@ def _load_from_epic() -> set[str]:
     return exes
 
 
+def _load_from_riot() -> set[str]:
+    """Return exe basenames from locally installed Riot Games titles.
+
+    Scans ``_RIOT_METADATA_DIR`` for product subdirectories.  Each subdirectory
+    contains a ``*.product_settings.yaml`` file with an ``exe_name`` field
+    (e.g. ``"VALORANT-Win64-Shipping.exe"``).  The field is extracted with
+    simple string matching to avoid a PyYAML dependency.
+
+    Returns an empty set silently when Riot Games is not installed.
+    """
+    exes: set[str] = set()
+    try:
+        for product_dir in _RIOT_METADATA_DIR.iterdir():
+            if not product_dir.is_dir():
+                continue
+            for settings_file in product_dir.glob("*.product_settings.yaml"):
+                try:
+                    content = settings_file.read_text(encoding="utf-8", errors="ignore")
+                    for line in content.splitlines():
+                        # Match lines like:  exe_name: "VALORANT-Win64-Shipping.exe"
+                        stripped = line.strip()
+                        if stripped.startswith("exe_name:"):
+                            value = stripped.split(":", 1)[1].strip().strip('"\'')
+                            if value:
+                                exes.add(pathlib.Path(value).name.lower())
+                except (OSError, ValueError):
+                    continue
+    except OSError:
+        pass  # Riot Games not installed
+    return exes
+
+
 def _load_game_processes() -> frozenset[str]:
     """Union all three detection layers into a single frozenset of exe basenames."""
     return frozenset(
         _load_from_registry()
         | _load_from_epic()
+        | _load_from_riot()
         | _GAME_PROCESSES_FALLBACK
     )
 
@@ -367,7 +407,7 @@ def _load_game_processes() -> frozenset[str]:
 def _is_game(proc_name: str) -> bool:
     """Return True when *proc_name* belongs to a known game process.
 
-    Uses a 60-second TTL cache so the registry and Epic manifests are not
+    Uses a 60-second TTL cache so the registry and launcher manifests are not
     read on every foreground-change event, while still picking up newly
     installed or launched games without an agent restart.
     """

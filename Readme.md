@@ -6,6 +6,7 @@
 ![MongoDB](https://img.shields.io/badge/MongoDB-7.0+-47A248)
 ![Ollama](https://img.shields.io/badge/Ollama-local--inference-black)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D4)
+![Tests](https://img.shields.io/badge/tests-49%20passing-brightgreen)
 ![Maintained](https://img.shields.io/badge/maintained-yes-brightgreen)
 
 A full-stack child safety platform that detects and alerts parents when children attempt to "hop" from moderated gaming environments to unmoderated external platforms in real time.
@@ -16,8 +17,10 @@ HopMap monitors a child's Windows gaming session and uses LLM-powered classifica
 
 - **Desktop Agent** — Lightweight Windows sensor using Win32 hooks, Tesseract OCR, and clipboard monitoring with no local LLM overhead
 - **Classification Server** — FastAPI backend that runs Ollama locally for URL/context classification, keeping all AI inference off the child's machine
+- **Blocked-Words Filter** — Aho-Corasick multi-pattern filter that intercepts known harmful words and phrases before any LLM call, supporting special characters (`18+`) and Unicode scripts (Hebrew)
 - **Parent Dashboard** — React frontend with live SSE event streaming, child profiles, alert history, and whitelist/blacklist management
 - **MongoDB Database** — Persistent storage for hop events, session history, per-child settings, whitelists, and blacklists
+- **Test Suite** — 49 passing tests across unit and integration layers covering the filter engine, platform loader, classify endpoint, and words CRUD API
 
 ## 🚀 Quick Start
 
@@ -33,29 +36,29 @@ ollama pull llama3
 
 1. **Configure the server** (copy and fill in your values):
    ```bash
-   cd backend/server
+   cd server
    cp .env.example .env
    # Set MONGO_URI, OLLAMA_MODEL, etc.
    ```
 
 2. **Start the server**:
    ```bash
-   cd backend/server
+   cd server
    pip install -r requirements.txt
    uvicorn server:app --host 0.0.0.0 --port 8000
    ```
 
 3. **Start the desktop agent** (on the child's Windows machine, in a new terminal):
    ```bash
-   cd backend/agent
+   cd agent
    pip install -r requirements.txt
    python agent.py        # shows console — useful for debugging
    # pythonw agent.py     # hides console — recommended for production
    ```
 
-4. **Start the frontend** (in a new terminal):
+4. **Start the dashboard** (in a new terminal):
    ```bash
-   cd frontend
+   cd dashboard
    npm install
    npm run dev
    ```
@@ -96,24 +99,39 @@ ollama pull llama3
 
 ```
 hop-map-repo/
-├── backend/
-│   ├── agent/                      # Windows desktop sensor
-│   │   ├── agent.py                # Main agent — Win32 hooks, OCR, clipboard, classification
-│   │   ├── config.py               # Agent configuration (server URL, thresholds)
-│   │   └── requirements.txt
-│   │
-│   └── server/                     # FastAPI classification & event server
-│       ├── server.py               # App entry point — all routes and SSE streaming
-│       ├── db.py                   # MongoDB connection pool & repository helpers
-│       ├── config.py               # Server configuration (env-var driven)
-│       ├── colors.py               # Terminal colour helpers
-│       ├── requirements.txt
-│       └── llm/                    # LLM provider abstraction
-│           ├── __init__.py         # Factory — get_provider()
-│           ├── base.py             # Abstract LLMProvider base class
-│           └── ollama_provider.py  # Ollama local inference (qwen2.5:7b / llama3)
+├── agent/                          # Windows desktop sensor
+│   ├── agent.py                    # Main agent — Win32 hooks, OCR, clipboard, classification
+│   ├── config.py                   # Agent configuration (server URL, thresholds)
+│   ├── agent_config.json           # Runtime config (loaded by config.py)
+│   └── requirements.txt
 │
-├── frontend/                       # React parent dashboard (Vite)
+├── server/                         # FastAPI classification & event server
+│   ├── server.py                   # App entry point — all routes and SSE streaming
+│   ├── db.py                       # MongoDB connection pool & repository helpers
+│   ├── config.py                   # Server configuration (env-var driven)
+│   ├── colors.py                   # Terminal colour helpers
+│   ├── words_filter.py             # Aho-Corasick multi-pattern blocked-words filter
+│   ├── server_config.json          # Runtime config (loaded by config.py)
+│   ├── requirements.txt
+│   ├── data/
+│   │   ├── hopmap_words_db.xlsx    # Blocked words & phrases source (seeded into MongoDB)
+│   │   └── platforms_db.xlsx       # Platform → process mappings (served to agents)
+│   ├── llm/                        # LLM provider abstraction
+│   │   ├── __init__.py             # Factory — get_provider()
+│   │   ├── base.py                 # Abstract LLMProvider base class
+│   │   └── ollama_provider.py      # Ollama local inference (qwen2.5:7b / llama3)
+│   └── tests/
+│       ├── conftest.py             # Shared fixtures (live server, file paths)
+│       ├── test_helpers.py         # Shared test utilities
+│       ├── unit_tests/
+│       │   ├── test_words_filter.py    # check_blocked_words() unit tests
+│       │   ├── test_platforms_loader.py
+│       │   └── words_db_tests.py       # Manual integration tests (requires live server)
+│       └── integration_tests/
+│           ├── test_classify_endpoint.py
+│           └── test_words_endpoints.py
+│
+├── dashboard/                      # React parent dashboard (Vite)
 │   ├── index.html
 │   ├── package.json
 │   ├── vite.config.js
@@ -134,7 +152,7 @@ hop-map-repo/
 
 ## 🔧 Components
 
-### 1. Desktop Agent (`backend/agent/`)
+### 1. Desktop Agent (`agent/`)
 
 A lightweight Windows-only sensor that runs on the child's PC. It performs no LLM work locally — all classification is delegated to the server, keeping gaming performance unaffected.
 
@@ -157,9 +175,13 @@ A lightweight Windows-only sensor that runs on the child's PC. It performs no LL
 | `title_match` | A browser navigated to the lure domain (title poll) |
 | `switch_only` | An app switch occurred but no stronger signal was available |
 
-### 2. Classification Server (`backend/server/`)
+### 2. Classification Server (`server/`)
 
 A FastAPI application that runs on the parent's network. It exposes endpoints for the agent, a real-time SSE stream for the dashboard, and REST management APIs.
+
+**Blocked-Words Filter (`server/words_filter.py`):**
+
+Before every LLM call, the server scans the context snippet through a `WordsFilter` backed by an [Aho-Corasick](https://en.wikipedia.org/wiki/Aho%E2%80%93Corasick_algorithm) automaton. This catches known bad phrases and words in a single O(n) pass — no regex tokenization, correct for all character sets including Hebrew and special-char entries like `18+`. Only if no match is found does the request proceed to Ollama.
 
 **Key Endpoints:**
 
@@ -181,7 +203,7 @@ A FastAPI application that runs on the parent's network. It exposes endpoints fo
 - SSE push ensures the parent dashboard updates instantly without polling
 - MongoDB connection pool with graceful startup fallback
 
-### 3. LLM Provider (`backend/server/llm/`)
+### 3. LLM Provider (`server/llm/`)
 
 A pluggable provider abstraction for classification inference.
 
@@ -193,7 +215,7 @@ A pluggable provider abstraction for classification inference.
 
 The classification prompt catches explicit URLs, bare platform usernames, and invitation-style phrasing ("DM me on insta") — not just raw links.
 
-### 4. Parent Dashboard (`frontend/`)
+### 4. Parent Dashboard (`dashboard/`)
 
 A React + Vite single-page application for parents.
 
@@ -211,7 +233,7 @@ A React + Vite single-page application for parents.
 
 ### Server Configuration
 
-Create `backend/server/.env` from `.env.example`:
+Create `server/.env` from `.env.example`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -225,7 +247,7 @@ Create `backend/server/.env` from `.env.example`:
 
 ### Agent Configuration
 
-Create `backend/agent/.env` from `.env.example`:
+Create `agent/.env` from `.env.example`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -233,6 +255,88 @@ Create `backend/agent/.env` from `.env.example`:
 | `OLLAMA_MODEL` | `qwen2.5:7b` | Ollama model tag (fallback, if server is unreachable) |
 | `SCAN_INTERVAL_SECONDS` | `5` | How often to OCR-scan the game window for links |
 | `CONTEXT_LINES` | `10` | Chat lines around a detected URL sent to the classifier |
+
+## 🧪 Testing
+
+The server has a full test suite with **49 tests** across unit and integration layers, all passing with 0 expected failures.
+
+### Running Tests
+
+```bash
+cd server
+pip install -r requirements.txt
+python -m pytest tests/ -v
+```
+
+### Test Structure
+
+```
+server/tests/
+├── conftest.py                          # Shared fixtures (live server, data file paths)
+├── test_helpers.py                      # Shared test utilities and constants
+├── unit_tests/
+│   ├── test_words_filter.py             # check_blocked_words() — 19 tests
+│   ├── test_platforms_loader.py         # Platform DB loader — 11 tests
+│   └── words_db_tests.py               # Manual integration tests (requires live server)
+└── integration_tests/
+    ├── test_classify_endpoint.py        # /agent/classify endpoint — 4 tests
+    └── test_words_endpoints.py         # /api/words CRUD — 9 tests
+```
+
+### Test Categories
+
+| Category | File | Tests | Description |
+|----------|------|-------|-------------|
+| Words filter unit | `test_words_filter.py` | 19 | `check_blocked_words()` with injected word sets; includes phrase matching, boundary checks, Unicode, and real-DB spot checks |
+| Platforms loader unit | `test_platforms_loader.py` | 11 | `_load_platforms_db()` with synthetic Excel fixtures and the real file |
+| Classify endpoint | `test_classify_endpoint.py` | 4 | Full HTTP flow: word-DB fast path (`via=word_db`), LLM fallback path, `18+`, and Hebrew |
+| Words endpoints | `test_words_endpoints.py` | 9 | `/api/words` CRUD: add, duplicate, normalise, delete, reload |
+| **Total** | | **49** | **0 expected failures** |
+
+### Example Test Scenarios
+
+**Word-boundary protection** — `hack` is blocked but `hackle` is not:
+```python
+def test_blocked_word_inside_longer_word_not_matched(self, monkeypatch):
+    _set_words(monkeypatch, {"hack"})
+    found, _ = check_blocked_words("hackle is a word about feathers")
+    assert found is False
+```
+
+**Special-char entry (`18+`)** — previously xfail, now passing via Aho-Corasick:
+```python
+def test_18plus_blocked(self):
+    found, _ = check_blocked_words("check out this 18+ content")
+    assert found is True
+```
+
+**Hebrew blocked phrase** — prefix-attached Hebrew matched correctly:
+```python
+def test_hebrew_blocked_word_in_discord_context(self, live_server, child_id):
+    res = requests.post(f"{live_server}/agent/classify",
+        json={"context": "בוא לדיסקורד שלי אחי", ...})
+    assert res.json()["via"] == "word_db"
+```
+
+**Longest-match wins** — more specific phrase takes priority over a shorter contained word:
+```python
+def test_longest_phrase_matched_first(self, monkeypatch):
+    _set_words(monkeypatch, {"tell your parents", "don't tell your parents"})
+    found, matched = check_blocked_words("please don't tell your parents about this")
+    assert matched == "don't tell your parents"  # longer phrase wins
+```
+
+**Live server fixture** — integration tests spin up a real FastAPI + uvicorn instance on a free port, run the tests, then tear it down. No mocks, no hardcoded ports:
+```python
+@pytest.fixture(scope="session")
+def live_server():
+    port = find_free_port()
+    thread = threading.Thread(target=uvicorn.run, kwargs={...}, daemon=True)
+    thread.start()
+    # wait for ready, yield base URL, cleanup on session end
+```
+
+---
 
 ## 🛡️ Security Notice
 
@@ -252,6 +356,7 @@ ollama
 pymongo>=4.6.0
 python-dotenv
 pydantic>=2.0.0
+pyahocorasick>=1.4.0
 
 # Agent (Windows only)
 pywin32
