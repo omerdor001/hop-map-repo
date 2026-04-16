@@ -50,7 +50,6 @@ class TestWordsDB:
         assert "hack" in result["reason"]
         assert result["decision"] == "YES"
 
-    @pytest.mark.xfail(reason="'+' character not matched by \\w+ regex")
     def test_via_words_db_18plus(self, child_id):
         """Blocked word '18+' should be caught by words DB."""
         res = requests.post(
@@ -68,7 +67,6 @@ class TestWordsDB:
         assert "18+" in result["reason"]
         assert result["decision"] == "YES"
 
-    @pytest.mark.xfail(reason="Hebrew unicode not matched by \\w+ regex")
     def test_via_word_db_hebrew_discord(self, child_id):
         """Hebrew 'discord' should be caught by words DB."""
         res = requests.post(
