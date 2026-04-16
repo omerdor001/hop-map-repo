@@ -49,130 +49,152 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 import db
-from config import server_config
+from config import config_manager
 from llm import LLMProvider, get_provider
+from words_filter import WordsFilter
 
 # ---------------------------------------------------------------------------
 # Nasty Words Database (Excel-based word blocking)
 # ---------------------------------------------------------------------------
-# Load blocked words from an Excel file to avoid unnecessary LLM calls.
-# The Excel file should have a column named "word" containing the blocked terms.
-# Set WORDS_DB_PATH in .env to point to your Excel file.
+# Blocked words — in-memory cache, source of truth is MongoDB `words` collection.
+# Seeded once from Excel on first startup. Refreshed on a TTL background task
+# and immediately after any write via the /api/words endpoints.
 
-# Global set to store blocked words (loaded once at startup)
-_blocked_words: set[str] = set()
+_filter: WordsFilter = WordsFilter()   # Aho-Corasick multi-pattern filter
+_words_refresh_task: asyncio.Task | None = None
+
+# ---------------------------------------------------------------------------
+# Platform Database (Excel-based, served to agents via GET /api/platforms)
+# ---------------------------------------------------------------------------
+
+_platform_app_map: dict[str, list[str]] = {}
+_browser_processes: list[str] = []
+_transit_processes: list[str] = []
 
 
-def _load_blocked_words() -> None:
+def _load_platforms_db() -> None:
+    """Load platform→process mappings from the Excel file at startup.
+
+    Expected columns: ``platform`` and ``process``.
+    Special platform names ``browser`` and ``transit`` populate the
+    corresponding process lists rather than the platform map.
+
+    If the file is absent or malformed, the module-level lists remain empty
+    and the server still starts — agents will fall back to their hardcoded
+    defaults.
     """
-    Load blocked words from the Excel file specified in WORDS_DB_PATH.
-    Called once during server startup. Words are stored in a set for O(1) lookup.
+    import openpyxl
 
-    Expected Excel format:
-        - File: any .xlsx workbook
-        - Column: "word" (case-insensitive, words will be normalized to lowercase)
-
-    If WORDS_DB_PATH is empty or file not found, the set remains empty
-    and all classification falls through to LLM.
-    """
-    global _blocked_words
-
-    # Get the path from config (set via WORDS_DB_PATH env var)
-    excel_path = server_config.words_db_path
-
-    # If no path configured, skip loading
-    if not excel_path:
-        log.info("WORDS_DB_PATH not configured - word blocking disabled")
-        return
-
-    # Check if file exists
-    if not os.path.exists(excel_path):
-        log.warning("Words database file not found: %s", excel_path)
+    excel_path = config_manager.data.platforms_db_path
+    if not excel_path or not os.path.exists(excel_path):
+        log.warning("Platforms DB not found at %r — agents will use built-in defaults.", excel_path)
         return
 
     try:
-        # Import openpyxl here to make it optional (only needed if using word blocking)
-        import openpyxl
+        workbook  = openpyxl.load_workbook(excel_path, read_only=True)
+        try:
+            worksheet = workbook.active
 
-        # Load the Excel workbook
-        workbook = openpyxl.load_workbook(excel_path, read_only=True)
-        worksheet = workbook.active
+            platform_col = process_col = None
+            for cell in worksheet[1]:
+                if cell.value:
+                    name = str(cell.value).strip().lower()
+                    if name == "platform":
+                        platform_col = cell.column - 1
+                    elif name == "process":
+                        process_col = cell.column - 1
 
-        # Find the "word" column (header row)
-        word_col_idx = None
-        headers = []
+            if platform_col is None or process_col is None:
+                log.warning("Platforms DB missing 'platform' or 'process' column — skipping.")
+                return
 
-        # Read first row to find headers
-        for cell in worksheet[1]:
-            headers.append(cell.value)
-            if cell.value and str(cell.value).strip().lower() == "word":
-                word_col_idx = cell.column - 1  # Convert to 0-indexed
-                break
+            platforms: dict[str, set[str]] = {}
+            browsers:  set[str] = set()
+            transits:  set[str] = set()
 
-        if word_col_idx is None:
-            log.warning(
-                "Excel file '%s' has no 'word' column - word blocking disabled",
-                excel_path,
-            )
+            for row in worksheet.iter_rows(min_row=2, values_only=True):
+                if not row:
+                    continue
+                plat = row[platform_col] if platform_col < len(row) else None
+                proc = row[process_col]  if process_col  < len(row) else None
+                if not plat or not proc:
+                    continue
+                plat = str(plat).strip().lower()
+                proc = str(proc).strip().lower()
+                if not plat or not proc:
+                    continue
+                if plat == "browser":
+                    browsers.add(proc)
+                elif plat == "transit":
+                    transits.add(proc)
+                else:
+                    platforms.setdefault(plat, set()).add(proc)
+        finally:
             workbook.close()
-            return
 
-        # Load all words from the column (skip header)
-        words = set()
-        for row in worksheet.iter_rows(min_row=2, values_only=True):
-            if row and row[word_col_idx]:
-                word = str(row[word_col_idx]).strip().lower()
-                if word:  # Only add non-empty words
-                    words.add(word)
+        global _platform_app_map, _browser_processes, _transit_processes
+        _platform_app_map  = {k: sorted(v) for k, v in platforms.items()}
+        _browser_processes = sorted(browsers)
+        _transit_processes = sorted(transits)
 
-        workbook.close()
+        log.info(
+            "Loaded %d platforms, %d browsers, %d transit processes from %s",
+            len(_platform_app_map), len(_browser_processes), len(_transit_processes),
+            excel_path,
+        )
 
-        # Update the global set
-        _blocked_words = words
-        log.info("Loaded %d blocked words from %s", len(words), excel_path)
+    except Exception as exc:
+        log.warning("Failed to load platforms DB: %s — agents will use built-in defaults.", exc)
+        _platform_app_map.clear()
+        _browser_processes.clear()
+        _transit_processes.clear()
 
-    except Exception as e:
-        log.warning("Failed to load words database: %s", e)
-        _blocked_words = set()
+
+def _load_blocked_words() -> None:
+    """Reload the in-memory blocked-words filter from MongoDB.
+
+    Builds a fresh Aho-Corasick automaton from the full entry list so that
+    all patterns — including special-char entries like '18+' and non-ASCII
+    scripts like Hebrew — are matched correctly.
+
+    Called once during startup, periodically by the background refresh task,
+    and immediately after any write via the /api/words endpoints.
+    """
+    try:
+        entries = db.get_blocked_words()
+        _filter.build(entries)
+        log.info(
+            "Blocked entries reloaded: %d total (%d single-word, %d phrase)",
+            _filter.entry_count,
+            len(_filter.words),
+            _filter.entry_count - len(_filter.words),
+        )
+    except Exception as exc:
+        log.warning("Failed to reload blocked words from MongoDB: %s", exc)
+
+
+async def _words_refresh_loop() -> None:
+    """Background asyncio task: reload blocked words every N seconds."""
+    interval = config_manager.db.words_refresh_interval_seconds
+    while True:
+        await asyncio.sleep(interval)
+        _load_blocked_words()
 
 
 def check_blocked_words(text: str) -> tuple[bool, str]:
+    """Check if any blocked word or phrase appears in the given text.
+
+    Delegates to the module-level :data:`_filter` (Aho-Corasick automaton).
+    Returns ``(True, matched_entry)`` on the first (longest) match, or
+    ``(False, "")`` when no blocked entry is found.
     """
-    Check if any blocked word appears in the given text.
-
-    Args:
-        text: The message/context text to check
-
-    Returns:
-        A tuple of (found: bool, matched_word: str)
-        - found: True if a blocked word was found
-        - matched_word: The first matched word (for logging/alerting)
-
-    How it works:
-        - Normalizes text to lowercase for case-insensitive matching
-        - Splits text into words and checks each against blocked words set
-        - Returns immediately on first match (O(n) where n = number of words in text)
-    """
-    if not _blocked_words:
-        # No words loaded - skip check
-        return False, ""
-
-    # Normalize text to lowercase
-    text_lower = text.lower()
-
-    # Split text into words (handles various whitespace and punctuation)
-    words = re.findall(r"\b\w+\b", text_lower)
-
-    # Check each word against blocked words set
-    for word in words:
-        if word in _blocked_words:
-            log.info("Blocked word detected: '%s'", word)
-            return True, word
-
-    return False, ""
+    found, matched = _filter.find(text)
+    if found:
+        log.info("Blocked entry detected: '%s'", matched)
+    return found, matched
 
 
 # ---------------------------------------------------------------------------
@@ -192,12 +214,29 @@ log = logging.getLogger("hopmap-server")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _words_refresh_task
     log.info("HopMap server starting.")
     db.initialize_indexes()
-    # Load blocked words from Excel at startup
+
+    # Seed MongoDB words collection from Excel on first run (empty collection only).
+    words_path = config_manager.data.words_db_path
+    if not db.get_blocked_words() and words_path and os.path.exists(words_path):
+        seeded = db.seed_words_from_excel(words_path)
+        log.info("Seeded %d words from Excel into MongoDB words collection", seeded)
+
+    # Load blocked words into memory and start background refresh task.
     _load_blocked_words()
+    _words_refresh_task = asyncio.create_task(_words_refresh_loop())
+
+    # Load platform→process mappings (served to agents via GET /api/platforms)
+    _load_platforms_db()
+
     yield
+
     log.info("HopMap server shutting down.")
+    if _words_refresh_task is not None:
+        _words_refresh_task.cancel()
+        await asyncio.gather(_words_refresh_task, return_exceptions=True)
     # Signal all open SSE generators to exit before Uvicorn's cancel deadline.
     for queues in list(_sse_queues.values()):
         for q in queues:
@@ -208,7 +247,7 @@ app = FastAPI(title="HopMap API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=server_config.cors_origins,
+    allow_origins=config_manager.network.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -232,8 +271,8 @@ _DEMO_MODE: bool = os.getenv("DEMO_MODE", "false").lower() == "true"
 # To swap providers, change LLM_PROVIDER in .env — no code changes needed.
 
 _llm: LLMProvider = get_provider(
-    name=server_config.llm_provider,
-    model=server_config.ollama_model,
+    name=config_manager.llm.provider,
+    model=config_manager.llm.model,
 )
 
 # ---------------------------------------------------------------------------
@@ -524,10 +563,76 @@ async def stream(child_id: str, request: Request) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 
 
+@app.get("/api/platforms")
+def get_platforms() -> dict:
+    """Return platform→process mappings, browser and transit process lists.
+
+    Agents call this once on startup so that platform config is managed
+    centrally on the server — no data files are needed on the child's machine.
+    """
+    return {
+        "platforms": _platform_app_map,
+        "browsers":  _browser_processes,
+        "transit":   _transit_processes,
+    }
+
+
 @app.get("/health")
 def health() -> dict:
     db_ok = db.ping()
     return {"status": "ok" if db_ok else "db_unavailable", "db": db_ok}
+
+
+# ---------------------------------------------------------------------------
+# Blocked words management
+# ---------------------------------------------------------------------------
+
+
+class WordRequest(BaseModel):
+    word: str
+
+    @field_validator("word", mode="after")
+    @classmethod
+    def _normalise(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v:
+            raise ValueError("word must not be empty or whitespace")
+        return v
+
+
+@app.get("/api/words")
+def get_words() -> dict:
+    """Return the current in-memory blocked-words list."""
+    words = _filter.words
+    return {"count": len(words), "words": words}
+
+
+@app.post("/api/words", status_code=201)
+def create_word(body: WordRequest) -> dict:
+    """Add a blocked word. Persists to MongoDB and reloads the in-memory set."""
+    added = db.add_word(body.word)
+    _load_blocked_words()
+    log.info("Word %s  word=%r", "added" if added else "already existed", body.word)
+    return {"ok": True, "word": body.word, "added": added}
+
+
+@app.delete("/api/words/{word}")
+def delete_word(word: str) -> dict:
+    """Remove a blocked word. Persists to MongoDB and reloads the in-memory set."""
+    word = word.strip().lower()
+    if not word:
+        raise HTTPException(status_code=400, detail="word must not be empty")
+    removed = db.remove_word(word)
+    _load_blocked_words()
+    log.info("Word removed=%s  word=%r", removed, word)
+    return {"ok": True, "word": word, "removed": removed}
+
+
+@app.post("/api/words/reload")
+def reload_words() -> dict:
+    """Force an immediate reload of the blocked-words set from MongoDB."""
+    _load_blocked_words()
+    return {"ok": True, "count": len(_filter.words)}
 
 
 # ---------------------------------------------------------------------------
@@ -693,14 +798,14 @@ async def seed_demo() -> dict:
 if __name__ == "__main__":
     log.info(
         "Starting HopMap server on %s:%d",
-        server_config.host,
-        server_config.port,
+        config_manager.network.host,
+        config_manager.network.port,
     )
     try:
         uvicorn.run(
             "server:app",
-            host=server_config.host,
-            port=server_config.port,
+            host=config_manager.network.host,
+            port=config_manager.network.port,
             reload=False,
             timeout_graceful_shutdown=2,
         )
