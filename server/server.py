@@ -49,11 +49,153 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 import db
-from config import server_config
+from config import config_manager
 from llm import LLMProvider, get_provider
+from words_filter import WordsFilter
+
+# ---------------------------------------------------------------------------
+# Nasty Words Database (Excel-based word blocking)
+# ---------------------------------------------------------------------------
+# Blocked words — in-memory cache, source of truth is MongoDB `words` collection.
+# Seeded once from Excel on first startup. Refreshed on a TTL background task
+# and immediately after any write via the /api/words endpoints.
+
+_filter: WordsFilter = WordsFilter()   # Aho-Corasick multi-pattern filter
+_words_refresh_task: asyncio.Task | None = None
+
+# ---------------------------------------------------------------------------
+# Platform Database (Excel-based, served to agents via GET /api/platforms)
+# ---------------------------------------------------------------------------
+
+_platform_app_map: dict[str, list[str]] = {}
+_browser_processes: list[str] = []
+_transit_processes: list[str] = []
+
+
+def _load_platforms_db() -> None:
+    """Load platform→process mappings from the Excel file at startup.
+
+    Expected columns: ``platform`` and ``process``.
+    Special platform names ``browser`` and ``transit`` populate the
+    corresponding process lists rather than the platform map.
+
+    If the file is absent or malformed, the module-level lists remain empty
+    and the server still starts — agents will fall back to their hardcoded
+    defaults.
+    """
+    import openpyxl
+
+    excel_path = config_manager.data.platforms_db_path
+    if not excel_path or not os.path.exists(excel_path):
+        log.warning("Platforms DB not found at %r — agents will use built-in defaults.", excel_path)
+        return
+
+    try:
+        workbook  = openpyxl.load_workbook(excel_path, read_only=True)
+        try:
+            worksheet = workbook.active
+
+            platform_col = process_col = None
+            for cell in worksheet[1]:
+                if cell.value:
+                    name = str(cell.value).strip().lower()
+                    if name == "platform":
+                        platform_col = cell.column - 1
+                    elif name == "process":
+                        process_col = cell.column - 1
+
+            if platform_col is None or process_col is None:
+                log.warning("Platforms DB missing 'platform' or 'process' column — skipping.")
+                return
+
+            platforms: dict[str, set[str]] = {}
+            browsers:  set[str] = set()
+            transits:  set[str] = set()
+
+            for row in worksheet.iter_rows(min_row=2, values_only=True):
+                if not row:
+                    continue
+                plat = row[platform_col] if platform_col < len(row) else None
+                proc = row[process_col]  if process_col  < len(row) else None
+                if not plat or not proc:
+                    continue
+                plat = str(plat).strip().lower()
+                proc = str(proc).strip().lower()
+                if not plat or not proc:
+                    continue
+                if plat == "browser":
+                    browsers.add(proc)
+                elif plat == "transit":
+                    transits.add(proc)
+                else:
+                    platforms.setdefault(plat, set()).add(proc)
+        finally:
+            workbook.close()
+
+        global _platform_app_map, _browser_processes, _transit_processes
+        _platform_app_map  = {k: sorted(v) for k, v in platforms.items()}
+        _browser_processes = sorted(browsers)
+        _transit_processes = sorted(transits)
+
+        log.info(
+            "Loaded %d platforms, %d browsers, %d transit processes from %s",
+            len(_platform_app_map), len(_browser_processes), len(_transit_processes),
+            excel_path,
+        )
+
+    except Exception as exc:
+        log.warning("Failed to load platforms DB: %s — agents will use built-in defaults.", exc)
+        _platform_app_map.clear()
+        _browser_processes.clear()
+        _transit_processes.clear()
+
+
+def _load_blocked_words() -> None:
+    """Reload the in-memory blocked-words filter from MongoDB.
+
+    Builds a fresh Aho-Corasick automaton from the full entry list so that
+    all patterns — including special-char entries like '18+' and non-ASCII
+    scripts like Hebrew — are matched correctly.
+
+    Called once during startup, periodically by the background refresh task,
+    and immediately after any write via the /api/words endpoints.
+    """
+    try:
+        entries = db.get_blocked_words()
+        _filter.build(entries)
+        log.info(
+            "Blocked entries reloaded: %d total (%d single-word, %d phrase)",
+            _filter.entry_count,
+            len(_filter.words),
+            _filter.entry_count - len(_filter.words),
+        )
+    except Exception as exc:
+        log.warning("Failed to reload blocked words from MongoDB: %s", exc)
+
+
+async def _words_refresh_loop() -> None:
+    """Background asyncio task: reload blocked words every N seconds."""
+    interval = config_manager.db.words_refresh_interval_seconds
+    while True:
+        await asyncio.sleep(interval)
+        _load_blocked_words()
+
+
+def check_blocked_words(text: str) -> tuple[bool, str]:
+    """Check if any blocked word or phrase appears in the given text.
+
+    Delegates to the module-level :data:`_filter` (Aho-Corasick automaton).
+    Returns ``(True, matched_entry)`` on the first (longest) match, or
+    ``(False, "")`` when no blocked entry is found.
+    """
+    found, matched = _filter.find(text)
+    if found:
+        log.info("Blocked entry detected: '%s'", matched)
+    return found, matched
+
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -69,12 +211,32 @@ log = logging.getLogger("hopmap-server")
 # Application lifespan
 # ---------------------------------------------------------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _words_refresh_task
     log.info("HopMap server starting.")
     db.initialize_indexes()
+
+    # Seed MongoDB words collection from Excel on first run (empty collection only).
+    words_path = config_manager.data.words_db_path
+    if not db.get_blocked_words() and words_path and os.path.exists(words_path):
+        seeded = db.seed_words_from_excel(words_path)
+        log.info("Seeded %d words from Excel into MongoDB words collection", seeded)
+
+    # Load blocked words into memory and start background refresh task.
+    _load_blocked_words()
+    _words_refresh_task = asyncio.create_task(_words_refresh_loop())
+
+    # Load platform→process mappings (served to agents via GET /api/platforms)
+    _load_platforms_db()
+
     yield
+
     log.info("HopMap server shutting down.")
+    if _words_refresh_task is not None:
+        _words_refresh_task.cancel()
+        await asyncio.gather(_words_refresh_task, return_exceptions=True)
     # Signal all open SSE generators to exit before Uvicorn's cancel deadline.
     for queues in list(_sse_queues.values()):
         for q in queues:
@@ -85,7 +247,7 @@ app = FastAPI(title="HopMap API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=server_config.cors_origins,
+    allow_origins=config_manager.network.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -109,15 +271,15 @@ _DEMO_MODE: bool = os.getenv("DEMO_MODE", "false").lower() == "true"
 # To swap providers, change LLM_PROVIDER in .env — no code changes needed.
 
 _llm: LLMProvider = get_provider(
-    name=server_config.llm_provider,
-    model=server_config.ollama_model,
+    name=config_manager.llm.provider,
+    model=config_manager.llm.model,
 )
 
 # ---------------------------------------------------------------------------
 # Input validation
 # ---------------------------------------------------------------------------
 
-_CHILD_ID_RE = re.compile(r'^[a-zA-Z0-9_\-]{1,64}$')
+_CHILD_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
 
 
 def _validate_child_id(child_id: str) -> None:
@@ -200,18 +362,18 @@ def _run_llm_classify(context: str) -> dict:
 
 class ClassifyRequest(BaseModel):
     child_id: str = Field(..., alias="childId")
-    url:      str
-    context:  str
-    source:   str = "unknown"   # "ocr" | "clipboard" | "unknown"
+    url: str
+    context: str
+    source: str = "unknown"  # "ocr" | "clipboard" | "unknown"
 
     model_config = {"populate_by_name": True}
 
 
 class ClassifyResponse(BaseModel):
-    decision:   str            # "YES" | "NO"
-    confidence: int            # 0–100
-    reason:     str
-    via:        str = "server"
+    decision: str  # "YES" | "NO"
+    confidence: int  # 0–100
+    reason: str
+    via: str = "server"
 
 
 @app.post("/agent/classify", response_model=ClassifyResponse)
@@ -222,15 +384,18 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
     only a few lines of chat context so the payload is small.  Inference is the
     dominant latency — typically 1–4 s on a CPU with a 7B model.
 
+    Flow:
+        1. Check if any blocked word from the Excel database appears in context
+           → If found: return YES immediately (no LLM call needed)
+        2. Otherwise: call LLM for deeper analysis
+
     Returns HTTP 429 if the per-child rate limit is exceeded.
     Returns decision="NO", confidence=0 on any inference error so the agent
     treats the result as a non-event rather than a false positive.
     """
     _validate_child_id(body.child_id)
     if not await _check_classify_rate_limit(body.child_id):
-        log.warning(
-            "Classify rate limit hit  child=%r — rejecting.", body.child_id
-        )
+        log.warning("Classify rate limit hit  child=%r — rejecting.", body.child_id)
         raise HTTPException(
             status_code=429,
             detail="Classification rate limit exceeded.",
@@ -238,15 +403,42 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
 
     log.info(
         "Classifying  child=%r  source=%r  url=%s",
-        body.child_id, body.source, body.url,
+        body.child_id,
+        body.source,
+        body.url,
     )
+
+    # -----------------------------------------------------------------------
+    # STEP 1: Fast word matching BEFORE calling LLM
+    # -----------------------------------------------------------------------
+    # Check if any blocked word from the Excel DB appears in the message.
+    # This is a simple O(n) string match - much faster than LLM inference.
+    # If a word is found, we alert immediately without LLM.
+
+    word_found, matched_word = check_blocked_words(body.context)
+    if word_found:
+        # Blocked word detected - return YES immediately, no LLM needed
+        log.info(
+            "Blocked word matched for child=%r word=%r - skipping LLM",
+            body.child_id,
+            matched_word,
+        )
+        return ClassifyResponse(
+            decision="YES",
+            confidence=100,  # Maximum confidence for direct word match
+            reason=f"blocked_word: {matched_word}",
+            via="word_db",  # Indicates this came from word matching, not LLM
+        )
+
+    # -----------------------------------------------------------------------
+    # STEP 2: LLM classification (fallback when no blocked words found)
+    # -----------------------------------------------------------------------
+    # No blocked words matched - now use LLM for deeper analysis
 
     try:
         result = await asyncio.to_thread(_run_llm_classify, body.context)
     except json.JSONDecodeError as exc:
-        log.warning(
-            "LLM returned non-JSON for child %r: %s", body.child_id, exc
-        )
+        log.warning("LLM returned non-JSON for child %r: %s", body.child_id, exc)
         return ClassifyResponse(decision="NO", confidence=0, reason="parse_error")
     except Exception as exc:
         log.warning("LLM error for child %r: %s", body.child_id, exc)
@@ -254,14 +446,20 @@ async def agent_classify(body: ClassifyRequest) -> ClassifyResponse:
 
     log.info(
         "Classify result  child=%r  decision=%s  confidence=%d%%  reason=%r",
-        body.child_id, result["decision"], result["confidence"], result["reason"],
+        body.child_id,
+        result["decision"],
+        result["confidence"],
+        result["reason"],
     )
+    # Add via="server" to indicate this came from LLM (not word_db)
+    result["via"] = "server"
     return ClassifyResponse(**result)
 
 
 # ---------------------------------------------------------------------------
 # Hop event ingestion
 # ---------------------------------------------------------------------------
+
 
 @app.post("/agent/hop/{child_id}")
 async def agent_hop(child_id: str, request: Request) -> dict:
@@ -274,25 +472,25 @@ async def agent_hop(child_id: str, request: Request) -> dict:
     )
 
     event = {
-        "childId":            child_id,
-        "source":             "desktop",
-        "from":               body.get("from", ""),
-        "to":                 body.get("to", ""),
-        "fromTitle":          body.get("fromTitle", ""),
-        "toTitle":            body.get("toTitle", ""),
-        "timestamp":          body.get("timestamp", datetime.now(timezone.utc).isoformat()),
-        "blocked":            False,
-        "alert":              alert_reason is not None,
-        "alertReason":        alert_reason,
-        "receivedAt":         datetime.now(timezone.utc).isoformat(),
-        "clickConfidence":    body.get("clickConfidence"),
-        "confirmedTo":        body.get("confirmedTo"),
-        "confirmedToTitle":   body.get("confirmedToTitle"),
-        "confirmedAt":        body.get("confirmedAt"),
-        "context":            body.get("context"),
+        "childId": child_id,
+        "source": "desktop",
+        "from": body.get("from", ""),
+        "to": body.get("to", ""),
+        "fromTitle": body.get("fromTitle", ""),
+        "toTitle": body.get("toTitle", ""),
+        "timestamp": body.get("timestamp", datetime.now(timezone.utc).isoformat()),
+        "blocked": False,
+        "alert": alert_reason is not None,
+        "alertReason": alert_reason,
+        "receivedAt": datetime.now(timezone.utc).isoformat(),
+        "clickConfidence": body.get("clickConfidence"),
+        "confirmedTo": body.get("confirmedTo"),
+        "confirmedToTitle": body.get("confirmedToTitle"),
+        "confirmedAt": body.get("confirmedAt"),
+        "context": body.get("context"),
         "classifyConfidence": body.get("classifyConfidence"),
-        "classifyReason":     body.get("classifyReason"),
-        "classifySource":     body.get("classifySource"),
+        "classifyReason": body.get("classifyReason"),
+        "classifySource": body.get("classifySource"),
     }
 
     if alert_reason is not None and body.get("clickConfidence") != "switch_only":
@@ -301,8 +499,10 @@ async def agent_hop(child_id: str, request: Request) -> dict:
 
     log.info(
         "Hop  %r → %r  (%r → %r)  alert=%s",
-        event["from"], event["to"],
-        event["fromTitle"], event["toTitle"],
+        event["from"],
+        event["to"],
+        event["fromTitle"],
+        event["toTitle"],
         alert_reason or "none",
     )
     return {"ok": True}
@@ -311,6 +511,7 @@ async def agent_hop(child_id: str, request: Request) -> dict:
 # ---------------------------------------------------------------------------
 # SSE stream  (parent dashboard)
 # ---------------------------------------------------------------------------
+
 
 @app.get("/stream/{child_id}")
 async def stream(child_id: str, request: Request) -> StreamingResponse:
@@ -361,6 +562,21 @@ async def stream(child_id: str, request: Request) -> StreamingResponse:
 # Health
 # ---------------------------------------------------------------------------
 
+
+@app.get("/api/platforms")
+def get_platforms() -> dict:
+    """Return platform→process mappings, browser and transit process lists.
+
+    Agents call this once on startup so that platform config is managed
+    centrally on the server — no data files are needed on the child's machine.
+    """
+    return {
+        "platforms": _platform_app_map,
+        "browsers":  _browser_processes,
+        "transit":   _transit_processes,
+    }
+
+
 @app.get("/health")
 def health() -> dict:
     db_ok = db.ping()
@@ -368,8 +584,61 @@ def health() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Blocked words management
+# ---------------------------------------------------------------------------
+
+
+class WordRequest(BaseModel):
+    word: str
+
+    @field_validator("word", mode="after")
+    @classmethod
+    def _normalise(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not v:
+            raise ValueError("word must not be empty or whitespace")
+        return v
+
+
+@app.get("/api/words")
+def get_words() -> dict:
+    """Return the current in-memory blocked-words list."""
+    words = _filter.words
+    return {"count": len(words), "words": words}
+
+
+@app.post("/api/words", status_code=201)
+def create_word(body: WordRequest) -> dict:
+    """Add a blocked word. Persists to MongoDB and reloads the in-memory set."""
+    added = db.add_word(body.word)
+    _load_blocked_words()
+    log.info("Word %s  word=%r", "added" if added else "already existed", body.word)
+    return {"ok": True, "word": body.word, "added": added}
+
+
+@app.delete("/api/words/{word}")
+def delete_word(word: str) -> dict:
+    """Remove a blocked word. Persists to MongoDB and reloads the in-memory set."""
+    word = word.strip().lower()
+    if not word:
+        raise HTTPException(status_code=400, detail="word must not be empty")
+    removed = db.remove_word(word)
+    _load_blocked_words()
+    log.info("Word removed=%s  word=%r", removed, word)
+    return {"ok": True, "word": word, "removed": removed}
+
+
+@app.post("/api/words/reload")
+def reload_words() -> dict:
+    """Force an immediate reload of the blocked-words set from MongoDB."""
+    _load_blocked_words()
+    return {"ok": True, "count": len(_filter.words)}
+
+
+# ---------------------------------------------------------------------------
 # Events
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/events/{child_id}")
 def get_events(child_id: str, limit: int = 100) -> dict:
@@ -391,6 +660,7 @@ def clear_events(child_id: str) -> dict:
 # Children
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/children")
 def list_children() -> dict:
     """Return all registered children (plus any event-derived ones)."""
@@ -398,7 +668,7 @@ def list_children() -> dict:
 
 
 class RegisterChildRequest(BaseModel):
-    child_id:   Optional[str] = Field(None, alias="childId")
+    child_id: Optional[str] = Field(None, alias="childId")
     child_name: str = Field("", alias="childName")
 
     model_config = {"populate_by_name": True}
@@ -440,6 +710,7 @@ def rename_child(child_id: str, body: RenameChildRequest) -> dict:
 # Demo seed  (dev / competition demo only — not for production)
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/demo/seed")
 async def seed_demo() -> dict:
     """Inject a pre-baked demo session for childId='demo'.
@@ -453,51 +724,64 @@ async def seed_demo() -> dict:
 
     demo_hops = [
         {
-            "from": "explorer.exe",         "to": "robloxplayerbeta.exe",
-            "fromTitle": "Desktop",         "toTitle": "Roblox",
+            "from": "explorer.exe",
+            "to": "robloxplayerbeta.exe",
+            "fromTitle": "Desktop",
+            "toTitle": "Roblox",
         },
         {
-            "from": "robloxplayerbeta.exe", "to": "chrome.exe",
-            "fromTitle": "Roblox",          "toTitle": "Google Chrome",
+            "from": "robloxplayerbeta.exe",
+            "to": "chrome.exe",
+            "fromTitle": "Roblox",
+            "toTitle": "Google Chrome",
         },
         {
-            "from": "chrome.exe",           "to": "discord.exe",
-            "fromTitle": "Chrome",          "toTitle": "Discord",
-            "detection": "confirmed_hop",   "alertReason": "confirmed_hop",
+            "from": "chrome.exe",
+            "to": "discord.exe",
+            "fromTitle": "Chrome",
+            "toTitle": "Discord",
+            "detection": "confirmed_hop",
+            "alertReason": "confirmed_hop",
             "classifyConfidence": 92,
-            "classifyReason":     "discord link shared in game chat",
-            "classifySource":     "server",
-            "clickConfidence":    "app_match",
+            "classifyReason": "discord link shared in game chat",
+            "classifySource": "server",
+            "clickConfidence": "app_match",
         },
         {
-            "from": "discord.exe",          "to": "telegram.exe",
-            "fromTitle": "Discord",         "toTitle": "Telegram",
+            "from": "discord.exe",
+            "to": "telegram.exe",
+            "fromTitle": "Discord",
+            "toTitle": "Telegram",
         },
         {
-            "from": "telegram.exe",         "to": "robloxplayerbeta.exe",
-            "fromTitle": "Telegram",        "toTitle": "Roblox",
+            "from": "telegram.exe",
+            "to": "robloxplayerbeta.exe",
+            "fromTitle": "Telegram",
+            "toTitle": "Roblox",
         },
     ]
 
     inserted = []
     for i, hop in enumerate(demo_hops):
         event = {
-            "childId":            "demo",
-            "source":             "desktop",
-            "from":               hop["from"],
-            "to":                 hop["to"],
-            "fromTitle":          hop["fromTitle"],
-            "toTitle":            hop["toTitle"],
-            "timestamp":          datetime.fromtimestamp(base_time + i * 240, tz=timezone.utc).isoformat(),
-            "blocked":            False,
-            "alert":              hop.get("alertReason") is not None,
-            "alertReason":        hop.get("alertReason"),
-            "receivedAt":         datetime.now(timezone.utc).isoformat(),
-            "detection":          hop.get("detection"),
-            "clickConfidence":    hop.get("clickConfidence"),
+            "childId": "demo",
+            "source": "desktop",
+            "from": hop["from"],
+            "to": hop["to"],
+            "fromTitle": hop["fromTitle"],
+            "toTitle": hop["toTitle"],
+            "timestamp": datetime.fromtimestamp(
+                base_time + i * 240, tz=timezone.utc
+            ).isoformat(),
+            "blocked": False,
+            "alert": hop.get("alertReason") is not None,
+            "alertReason": hop.get("alertReason"),
+            "receivedAt": datetime.now(timezone.utc).isoformat(),
+            "detection": hop.get("detection"),
+            "clickConfidence": hop.get("clickConfidence"),
             "classifyConfidence": hop.get("classifyConfidence"),
-            "classifyReason":     hop.get("classifyReason"),
-            "classifySource":     hop.get("classifySource"),
+            "classifyReason": hop.get("classifyReason"),
+            "classifySource": hop.get("classifySource"),
         }
         if event["alertReason"] is not None:
             db.insert_event(event)
@@ -514,13 +798,14 @@ async def seed_demo() -> dict:
 if __name__ == "__main__":
     log.info(
         "Starting HopMap server on %s:%d",
-        server_config.host, server_config.port,
+        config_manager.network.host,
+        config_manager.network.port,
     )
     try:
         uvicorn.run(
             "server:app",
-            host=server_config.host,
-            port=server_config.port,
+            host=config_manager.network.host,
+            port=config_manager.network.port,
             reload=False,
             timeout_graceful_shutdown=2,
         )
