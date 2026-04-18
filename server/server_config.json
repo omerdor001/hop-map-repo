@@ -14,5 +14,15 @@
   "llm": {
     "provider": "ollama",
     "model": "qwen2.5:7b"
-  }
+  },
+  "auth": {
+    "jwt_secret": "change-me-in-production",
+    "jwt_algorithm": "HS256",
+    "access_token_expire_minutes": 15,
+    "refresh_token_expire_days": 30,
+    "refresh_cookie_name": "hopmap_refresh",
+    "refresh_cookie_secure": false
+  },
+  "classify_max_rpm": 30,
+  "demo_mode": false
 }

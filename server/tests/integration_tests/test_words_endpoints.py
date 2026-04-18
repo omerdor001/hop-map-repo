@@ -1,113 +1,88 @@
-"""
-Integration tests for the /api/words endpoints.
+"""Integration tests for the /api/words endpoints.
 
-Requires a live server + MongoDB.  The `live_server` fixture in conftest.py
-handles startup automatically.
-
-Each test is isolated: words added during a test are cleaned up in teardown
-so the shared words collection is not polluted across test runs.
+Uses the mocked TestClient (app_client fixture from conftest.py) so that no
+real MongoDB or Ollama instance is required.
 """
+from __future__ import annotations
 
 import pytest
-import requests
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _get_words(base_url: str) -> list[str]:
-    res = requests.get(f"{base_url}/api/words", timeout=10)
-    res.raise_for_status()
-    return res.json()["words"]
-
-
-def _add_word(base_url: str, word: str) -> dict:
-    res = requests.post(f"{base_url}/api/words", json={"word": word}, timeout=10)
-    res.raise_for_status()
-    return res.json()
-
-
-def _delete_word(base_url: str, word: str) -> dict:
-    res = requests.delete(f"{base_url}/api/words/{word}", timeout=10)
-    res.raise_for_status()
-    return res.json()
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 class TestWordsEndpoints:
 
     _test_word = "integration_test_sentinel_xyz"
 
     @pytest.fixture(autouse=True)
-    def _cleanup(self, live_server):
-        """Ensure the sentinel word is removed before and after each test."""
-        requests.delete(f"{live_server}/api/words/{self._test_word}", timeout=10)
+    def _cleanup(self, app_client):
+        client, _ = app_client
+        client.delete(f"/api/words/{self._test_word}")
         yield
-        requests.delete(f"{live_server}/api/words/{self._test_word}", timeout=10)
+        client.delete(f"/api/words/{self._test_word}")
 
-    def test_get_words_returns_list_and_count(self, live_server):
-        res = requests.get(f"{live_server}/api/words", timeout=10)
+    def test_get_words_returns_list_and_count(self, app_client):
+        client, _ = app_client
+        res = client.get("/api/words")
         assert res.status_code == 200
         body = res.json()
         assert "words" in body
         assert "count" in body
         assert body["count"] == len(body["words"])
 
-    def test_add_word_appears_in_get(self, live_server):
-        _add_word(live_server, self._test_word)
-        assert self._test_word in _get_words(live_server)
+    def test_add_word_appears_in_get(self, app_client):
+        client, _ = app_client
+        client.post("/api/words", json={"word": self._test_word})
+        words = client.get("/api/words").json()["words"]
+        assert self._test_word in words
 
-    def test_add_duplicate_word_is_idempotent(self, live_server):
-        _add_word(live_server, self._test_word)
-        before = _get_words(live_server)
+    def test_add_duplicate_word_is_idempotent(self, app_client):
+        client, _ = app_client
+        client.post("/api/words", json={"word": self._test_word})
+        before = client.get("/api/words").json()["words"]
 
-        result = _add_word(live_server, self._test_word)
-        after = _get_words(live_server)
+        result = client.post("/api/words", json={"word": self._test_word}).json()
+        after = client.get("/api/words").json()["words"]
 
         assert result["added"] is False
         assert before.count(self._test_word) == after.count(self._test_word) == 1
 
-    def test_add_word_normalised_to_lowercase(self, live_server):
-        res = requests.post(
-            f"{live_server}/api/words",
-            json={"word": "  UPPER_CASE_WORD_XYZ  "},
-            timeout=10,
-        )
-        res.raise_for_status()
+    def test_add_word_normalised_to_lowercase(self, app_client):
+        client, _ = app_client
+        client.post("/api/words", json={"word": "  UPPER_CASE_WORD_XYZ  "})
         normalised = "upper_case_word_xyz"
         try:
-            assert normalised in _get_words(live_server)
+            assert normalised in client.get("/api/words").json()["words"]
         finally:
-            requests.delete(f"{live_server}/api/words/{normalised}", timeout=10)
+            client.delete(f"/api/words/{normalised}")
 
-    def test_delete_word_removes_from_list(self, live_server):
-        _add_word(live_server, self._test_word)
-        assert self._test_word in _get_words(live_server)
+    def test_delete_word_removes_from_list(self, app_client):
+        client, _ = app_client
+        client.post("/api/words", json={"word": self._test_word})
+        assert self._test_word in client.get("/api/words").json()["words"]
 
-        result = _delete_word(live_server, self._test_word)
+        result = client.delete(f"/api/words/{self._test_word}").json()
         assert result["removed"] is True
-        assert self._test_word not in _get_words(live_server)
+        assert self._test_word not in client.get("/api/words").json()["words"]
 
-    def test_delete_nonexistent_word_returns_removed_false(self, live_server):
-        result = _delete_word(live_server, self._test_word)
+    def test_delete_nonexistent_word_returns_removed_false(self, app_client):
+        client, _ = app_client
+        result = client.delete(f"/api/words/{self._test_word}").json()
         assert result["removed"] is False
 
-    def test_reload_returns_ok_and_count(self, live_server):
-        res = requests.post(f"{live_server}/api/words/reload", timeout=10)
+    def test_reload_returns_ok_and_count(self, app_client):
+        client, _ = app_client
+        res = client.post("/api/words/reload")
         assert res.status_code == 200
         body = res.json()
         assert body["ok"] is True
         assert isinstance(body["count"], int)
         assert body["count"] >= 0
 
-    def test_add_empty_word_rejected(self, live_server):
-        res = requests.post(f"{live_server}/api/words", json={"word": "   "}, timeout=10)
+    def test_add_empty_word_rejected(self, app_client):
+        client, _ = app_client
+        res = client.post("/api/words", json={"word": "   "})
         assert res.status_code == 422
 
-    def test_add_missing_word_field_rejected(self, live_server):
-        res = requests.post(f"{live_server}/api/words", json={}, timeout=10)
+    def test_add_missing_word_field_rejected(self, app_client):
+        client, _ = app_client
+        res = client.post("/api/words", json={})
         assert res.status_code == 422
