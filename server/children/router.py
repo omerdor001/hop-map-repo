@@ -16,7 +16,10 @@ def list_children(current_user: dict = Depends(get_current_user)) -> dict:
 
 @router.post("", status_code=201)
 def register_child(body: RegisterChildRequest, current_user: dict = Depends(get_current_user)) -> dict:
-    return children_service.add_child(body.child_id, body.child_name, current_user["id"])
+    return children_service.add_child(
+        body.child_id, body.child_name, current_user["id"],
+        max_children=current_user.get("maxChildren", 1),
+    )
 
 
 @router.patch("/{child_id}")

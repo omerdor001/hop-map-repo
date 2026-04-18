@@ -3,6 +3,11 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
 
+class AgentMeResponse(BaseModel):
+    childId: str
+    childName: str
+
+
 class ClassifyRequest(BaseModel):
     child_id: str = Field(..., alias="childId")
     url: str = Field(..., max_length=2048)

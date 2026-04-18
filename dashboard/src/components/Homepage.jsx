@@ -8,8 +8,10 @@ import {
   todayDefault,
   Dot,
 } from "../utils/eventHelpers"
+import { useAuth } from "../context/AuthContext"
 
 export default function Homepage({ childList, activeId, setActiveId }) {
+  const { authFetch } = useAuth()
   const [time, setTime]             = useState(new Date())
   const [allEvents, setAllEvents]   = useState([])
   const [sseConnected, setSseConnected] = useState(false)
@@ -42,13 +44,13 @@ export default function Homepage({ childList, activeId, setActiveId }) {
     }
     es.onerror = () => {
       setSseConnected(false)
-      fetch(`/api/events/${activeId}?limit=500`)
-        .then(r => r.json())
-        .then(data => setAllEvents(data.events || []))
+      authFetch(`/api/events/${activeId}?limit=500`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => setAllEvents(data?.events || []))
         .catch(() => {})
     }
     return () => es.close()
-  }, [activeId])
+  }, [activeId, authFetch])
 
   const handleDateChange = (e) => {
     let val = e.target.value.replace(/[^\d/]/g, "")

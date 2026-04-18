@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react"
 import { getInitials } from "../utils/eventHelpers"
+import { useAuth } from "../context/AuthContext"
+import AddChildModal from "./AddChildModal"
 
 const card = {
   background: "#16161a", border: "1px solid #1e1e24", borderRadius: 12,
@@ -7,18 +9,25 @@ const card = {
 }
 
 export default function Kids({ setChildList }) {
+  const { authFetch } = useAuth()
   const [children, setChildren]   = useState([])
+  const [maxChildren, setMaxChildren] = useState(null)  // null = loading
   const [editing, setEditing]     = useState({})   // { childId: draftName }
   const [saving, setSaving]       = useState({})   // { childId: true }
   const [saved, setSaved]         = useState({})   // { childId: true }
   const [error, setError]         = useState({})   // { childId: msg }
+  const [addOpen, setAddOpen]     = useState(false)
 
   useEffect(() => {
-    fetch("/api/children")
-      .then(r => r.json())
-      .then(data => setChildren(data.children || []))
+    authFetch("/api/children")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setChildren(data?.children || []))
       .catch(() => {})
-  }, [])
+    authFetch("/api/me")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setMaxChildren(data?.maxChildren ?? 0))
+      .catch(() => {})
+  }, [authFetch])
 
   function startEdit(child) {
     setEditing(e => ({ ...e, [child.childId]: child.childName }))
@@ -31,7 +40,7 @@ export default function Kids({ setChildList }) {
     if (!name) return
     setSaving(s => ({ ...s, [childId]: true }))
     try {
-      const res = await fetch(`/api/children/${childId}`, {
+      const res = await authFetch(`/api/children/${childId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ childName: name }),
@@ -49,8 +58,23 @@ export default function Kids({ setChildList }) {
     }
   }
 
+  function handleChildCreated(newChild) {
+    const child = { childId: newChild.childId, childName: newChild.childName }
+    setChildren(c => [child, ...c])
+    if (setChildList) setChildList(c => [child, ...c])
+  }
+
+  const atLimit = maxChildren !== null && children.length >= maxChildren
+  const canAdd  = !atLimit
+
   return (
-    <div style={{ padding: "40px 48px", maxWidth: 700 }}>
+    <>
+    <AddChildModal
+      open={addOpen}
+      onClose={() => setAddOpen(false)}
+      onCreated={handleChildCreated}
+    />
+    <div style={{ padding: "40px 48px", maxWidth: 700, margin: "0 auto" }}>
       {/* Header */}
       <div style={{ marginBottom: 32 }}>
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", color: "#6366f1", marginBottom: 6 }}>
@@ -58,14 +82,50 @@ export default function Kids({ setChildList }) {
         </div>
         <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: "#fff" }}>Kids Management</h1>
         <p style={{ margin: "8px 0 0", color: "#6b7280", fontSize: 14 }}>
-          Rename monitored children as they appear on the dashboard.
+          Manage monitored children and install the agent on their PCs.
         </p>
+        <button
+          onClick={() => canAdd && setAddOpen(true)}
+          disabled={!canAdd}
+          title={atLimit ? "Upgrade your plan to add more children" : undefined}
+          style={{
+            background: canAdd ? "#6366f1" : "#2a2a35",
+            color: canAdd ? "#fff" : "#4b5563",
+            border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
+            padding: "9px 18px", cursor: canAdd ? "pointer" : "not-allowed", marginTop: 20,
+          }}
+        >
+          + Add child
+        </button>
+        {atLimit && maxChildren === 0 && (
+          <div style={{ fontSize: 13, color: "#f59e0b", marginTop: 10 }}>
+            You're on the Free plan.{" "}
+            <a href="/plan" style={{ color: "#6366f1" }}>Upgrade</a>{" "}to add children.
+          </div>
+        )}
+        {atLimit && maxChildren > 0 && (
+          <div style={{ fontSize: 13, color: "#f59e0b", marginTop: 10 }}>
+            Child limit reached ({maxChildren}).{" "}
+            <a href="/plan" style={{ color: "#6366f1" }}>Upgrade your plan</a>{" "}to add more.
+          </div>
+        )}
       </div>
 
       {/* List */}
       {children.length === 0 ? (
         <div style={{ color: "#4b5563", fontSize: 14, padding: "32px 0" }}>
-          No children registered yet. Start the agent to register a child automatically.
+          No children yet.{" "}
+          {canAdd ? (
+            <span
+              style={{ color: "#6366f1", cursor: "pointer", textDecoration: "underline" }}
+              onClick={() => setAddOpen(true)}
+            >
+              Add your first child
+            </span>
+          ) : (
+            <a href="/plan" style={{ color: "#6366f1" }}>Upgrade your plan</a>
+          )}{" "}
+          to get started.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -138,5 +198,6 @@ export default function Kids({ setChildList }) {
         </div>
       )}
     </div>
+    </>
   )
 }

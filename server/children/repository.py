@@ -29,6 +29,10 @@ def rename_child(child_id: str, child_name: str) -> bool:
     return result.modified_count > 0
 
 
+def count_children(parent_id: str) -> int:
+    return _col_children().count_documents({"parentId": parent_id})
+
+
 def get_children(parent_id: str) -> list[dict]:
     return [
         {"childId": doc["childId"], "childName": doc.get("childName", doc["childId"])}

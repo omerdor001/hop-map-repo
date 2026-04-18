@@ -22,6 +22,16 @@ def _ok_response(json_data: dict) -> MagicMock:
     return resp
 
 
+def _http_error_response(status_code: int) -> MagicMock:
+    """Simulate requests raising HTTPError (e.g. 401, 403, 500)."""
+    response = MagicMock()
+    response.status_code = status_code
+    error = _real_requests.exceptions.HTTPError(response=response)
+    resp = MagicMock()
+    resp.raise_for_status.side_effect = error
+    return resp
+
+
 def _error_response(status_code: int = 500) -> MagicMock:
     resp = MagicMock()
     resp.status_code = status_code
@@ -116,51 +126,87 @@ class TestFetchPlatformDb:
 
 class TestRegisterChild:
 
-    def test_reads_persisted_id_without_posting(self, tmp_path):
+    def test_returns_child_id_from_server(self, tmp_path):
+        """Server responds with childId — returned and cached to disk."""
         id_file = tmp_path / ".child_id"
-        id_file.write_text("stored-id-123", encoding="utf-8")
 
-        post_mock = MagicMock(return_value=_ok_response({"childId": "stored-id-123"}))
+        get_mock = MagicMock(return_value=_ok_response({"childId": "server-id-123", "childName": "Alex"}))
 
         with patch.object(_agent, "_CHILD_ID_FILE", id_file), \
-             patch("requests.get", MagicMock()), \
-             patch("requests.post", post_mock):
+             patch.object(_agent.config_manager, "agent_token", "valid-token"), \
+             patch("requests.get", get_mock):
             child_id = _agent._register_child()
 
-        assert child_id == "stored-id-123"
-
-    def test_registers_fresh_when_no_id_file(self, tmp_path):
-        id_file = tmp_path / ".child_id"
-        # File does not exist.
-
-        post_mock = MagicMock(return_value=_ok_response({"childId": "new-id-456"}))
-
-        with patch.object(_agent, "_CHILD_ID_FILE", id_file), \
-             patch("requests.post", post_mock):
-            child_id = _agent._register_child()
-
-        assert child_id == "new-id-456"
-        # ID must be persisted to disk.
+        assert child_id == "server-id-123"
         assert id_file.exists()
-        assert id_file.read_text().strip() == "new-id-456"
+        assert id_file.read_text().strip() == "server-id-123"
 
-    def test_returns_fallback_id_when_server_unreachable(self, tmp_path):
+    def test_falls_back_to_cached_id_when_server_unreachable(self, tmp_path):
+        """Server is down — the locally cached ID is returned."""
         id_file = tmp_path / ".child_id"
+        id_file.write_text("cached-id-456", encoding="utf-8")
 
         with patch.object(_agent, "_CHILD_ID_FILE", id_file), \
-             patch("requests.post",
+             patch.object(_agent.config_manager, "agent_token", "valid-token"), \
+             patch("requests.get",
                    side_effect=_real_requests.exceptions.ConnectionError("refused")):
             child_id = _agent._register_child()
 
-        assert child_id == "child-unknown"
+        assert child_id == "cached-id-456"
 
-    def test_persists_id_to_file_after_registration(self, tmp_path):
+    def test_exits_when_no_token(self, tmp_path):
+        """Empty agent_token causes sys.exit(1) before any network call."""
         id_file = tmp_path / ".child_id"
 
-        post_mock = MagicMock(return_value=_ok_response({"childId": "persisted-789"}))
+        with patch.object(_agent, "_CHILD_ID_FILE", id_file), \
+             patch.object(_agent.config_manager, "agent_token", ""), \
+             patch("requests.get") as get_mock:
+            with pytest.raises(SystemExit) as exc_info:
+                _agent._register_child()
+
+        assert exc_info.value.code == 1
+        get_mock.assert_not_called()
+
+    def test_exits_when_server_down_and_no_cache(self, tmp_path):
+        """Server unreachable and no cached ID — sys.exit(1)."""
+        id_file = tmp_path / ".child_id"  # does not exist
 
         with patch.object(_agent, "_CHILD_ID_FILE", id_file), \
-             patch("requests.post", post_mock):
-            _agent._register_child()
+             patch.object(_agent.config_manager, "agent_token", "valid-token"), \
+             patch("requests.get",
+                   side_effect=_real_requests.exceptions.ConnectionError("refused")):
+            with pytest.raises(SystemExit) as exc_info:
+                _agent._register_child()
 
-        assert id_file.read_text().strip() == "persisted-789"
+        assert exc_info.value.code == 1
+
+    def test_server_id_overwrites_stale_cache(self, tmp_path):
+        """Cached ID is overwritten when the server returns a different value."""
+        id_file = tmp_path / ".child_id"
+        id_file.write_text("old-stale-id", encoding="utf-8")
+
+        get_mock = MagicMock(return_value=_ok_response({"childId": "fresh-id-789"}))
+
+        with patch.object(_agent, "_CHILD_ID_FILE", id_file), \
+             patch.object(_agent.config_manager, "agent_token", "valid-token"), \
+             patch("requests.get", get_mock):
+            child_id = _agent._register_child()
+
+        assert child_id == "fresh-id-789"
+        assert id_file.read_text().strip() == "fresh-id-789"
+
+    @pytest.mark.parametrize("status_code", [401, 403])
+    def test_exits_when_token_rejected_by_server(self, tmp_path, status_code):
+        """A 401/403 from the server is fatal — stale cache must not be used."""
+        id_file = tmp_path / ".child_id"
+        id_file.write_text("stale-cached-id", encoding="utf-8")
+
+        get_mock = MagicMock(return_value=_http_error_response(status_code))
+
+        with patch.object(_agent, "_CHILD_ID_FILE", id_file), \
+             patch.object(_agent.config_manager, "agent_token", "revoked-token"), \
+             patch("requests.get", get_mock):
+            with pytest.raises(SystemExit) as exc_info:
+                _agent._register_child()
+
+        assert exc_info.value.code == 1

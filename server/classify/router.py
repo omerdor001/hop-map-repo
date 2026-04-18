@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from auth.dependencies import get_agent_child
 from children.repository import get_child_by_id
 from classify import service as classify_service
-from classify.schemas import ClassifyRequest, ClassifyResponse, HopEventRequest
+from classify.schemas import AgentMeResponse, ClassifyRequest, ClassifyResponse, HopEventRequest
 from core.validators import validate_child_id
 from events import repository as event_repo
 from events import service as event_service
@@ -17,6 +17,15 @@ from words.service import check_blocked_words
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+@router.get("/me", response_model=AgentMeResponse)
+async def agent_me(agent_child: dict = Depends(get_agent_child)) -> AgentMeResponse:
+    """Return the child identity associated with the bearer token."""
+    return AgentMeResponse(
+        childId=agent_child["childId"],
+        childName=agent_child.get("childName", ""),
+    )
 
 
 @router.post("/classify", response_model=ClassifyResponse)
