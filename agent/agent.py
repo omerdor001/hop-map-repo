@@ -69,7 +69,6 @@ import winreg
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
 from urllib.parse import urlparse
 
 import mss
@@ -197,10 +196,7 @@ _configure_tesseract()
 # Configuration
 # ---------------------------------------------------------------------------
 
-BACKEND_URL = config_manager.backend_url
 CHILD_ID: str = ""  # assigned by the server on startup
-SCAN_INTERVAL = config_manager.scan_interval_seconds
-CONTEXT_LINES = config_manager.context_lines
 
 # File where the server-assigned child ID is persisted so the same record is
 # reused across agent restarts rather than creating a new orphaned profile.
@@ -223,7 +219,7 @@ def _register_child() -> str:
                 # the child is already registered (upsert with $setOnInsert).
                 try:
                     requests.post(
-                        f"{BACKEND_URL}/api/children",
+                        f"{config_manager.backend_url}/api/children",
                         json={"childId": stored},
                         timeout=5,
                     )
@@ -235,7 +231,7 @@ def _register_child() -> str:
 
     # ── Register fresh with the server ───────────────────────────────────
     try:
-        resp = requests.post(f"{BACKEND_URL}/api/children", json={}, timeout=5)
+        resp = requests.post(f"{config_manager.backend_url}/api/children", json={}, timeout=5)
         resp.raise_for_status()
         assigned = resp.json()["childId"]
         log.info("Server assigned child ID %r.", assigned)
@@ -477,7 +473,7 @@ def _app_matches_url(url: str, proc: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _extract_context(text: str, url: str, n: int = CONTEXT_LINES) -> str:
+def _extract_context(text: str, url: str, n: int = config_manager.context_lines) -> str:
     """Return up to *n* lines centred on the line that contains *url*."""
     lines = text.splitlines()
     for i, line in enumerate(lines):
@@ -571,7 +567,7 @@ def _classify(url: str, context: str, detection_source: str) -> _ClassifyResult:
 
     try:
         resp = requests.post(
-            f"{BACKEND_URL}/agent/classify",
+            f"{config_manager.backend_url}/agent/classify",
             json=payload,
             timeout=8,
         )
@@ -613,7 +609,7 @@ def _resolve_window(hwnd: int) -> tuple[str, str]:
     return proc, title
 
 
-def _hwnd_rect(hwnd: int) -> Optional[tuple[int, int, int, int]]:
+def _hwnd_rect(hwnd: int) -> tuple[int, int, int, int] | None:
     """Return *(left, top, width, height)* for *hwnd*, or ``None`` if minimised."""
     try:
         left, top, right, bottom = win32gui.GetWindowRect(hwnd)
@@ -649,7 +645,7 @@ def _ocr_window(hwnd: int) -> str:
 # no other code path (ctypes callbacks, scanner threads, classify threads)
 # can ever block on network I/O.
 
-_send_queue: queue.Queue[Optional[dict]] = queue.Queue()
+_send_queue: queue.Queue[dict | None] = queue.Queue()
 
 
 def _sender_loop() -> None:
@@ -660,7 +656,7 @@ def _sender_loop() -> None:
             return
         try:
             resp = requests.post(
-                f"{BACKEND_URL}/agent/hop/{CHILD_ID}",
+                f"{config_manager.backend_url}/agent/hop/{CHILD_ID}",
                 json=event,
                 timeout=5,
             )
@@ -704,7 +700,7 @@ _pending_hop_attempts: dict[str, dict] = {}
 # All mutations must be performed while holding *_last_switch_lock*.
 
 _last_switch_lock = threading.Lock()
-_last_non_game_switch: Optional[dict] = None  # { proc, title, hwnd, at }
+_last_non_game_switch: dict | None = None  # { proc, title, hwnd, at }
 
 # Maximum age (seconds) of a recorded switch that _try_late_confirm will
 # still act on.  Prevents a switch from many minutes ago being incorrectly
@@ -718,7 +714,7 @@ _LATE_CONFIRM_MAX_AGE = 60.0
 # Written exclusively by _process_foreground_change (event-processor thread).
 # Read by _clipboard_monitor_loop — a plain assignment is GIL-safe.
 
-_current_game: Optional[tuple[str, str]] = None
+_current_game: tuple[str, str] | None = None
 
 # ---------------------------------------------------------------------------
 # Click-confidence: browser title poll  (tier 2)
@@ -935,7 +931,7 @@ def _decide_and_send(
 # Game window scanner
 # ---------------------------------------------------------------------------
 
-_current_scanner_stop: Optional[threading.Event] = None
+_current_scanner_stop: threading.Event | None = None
 
 
 def _scanner_loop(
@@ -959,7 +955,7 @@ def _scanner_loop(
             return  # No point retrying on every tick.
         except Exception as exc:
             log.warning("OCR error: %s", exc)
-            stop.wait(SCAN_INTERVAL)
+            stop.wait(config_manager.scan_interval_seconds)
             continue
 
         for url in _find_urls(text):
@@ -976,7 +972,7 @@ def _scanner_loop(
                 name="classify-dispatch",
             ).start()
 
-        stop.wait(SCAN_INTERVAL)
+        stop.wait(config_manager.scan_interval_seconds)
 
     log.info("Stopped monitoring: %s", game_proc)
 
@@ -1062,7 +1058,7 @@ _WinEventProc = ctypes.WINFUNCTYPE(
 # therefore do nothing in the callback except push the HWND onto a queue
 # and let the dedicated event-processor thread handle everything else.
 
-_hwnd_event_queue: queue.Queue[Optional[int]] = queue.Queue()
+_hwnd_event_queue: queue.Queue[int | None] = queue.Queue()
 
 
 def _on_foreground_change(
@@ -1085,7 +1081,7 @@ def _on_foreground_change(
 
 _prev_proc: str = ""
 _prev_title: str = ""
-_scanner_thread: Optional[threading.Thread] = None
+_scanner_thread: threading.Thread | None = None
 
 
 def _process_foreground_change(hwnd: int) -> None:

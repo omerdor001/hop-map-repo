@@ -1,12 +1,12 @@
 ﻿# HopMap - Game Changers
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688)
 ![React](https://img.shields.io/badge/React-18+-61DAFB)
 ![MongoDB](https://img.shields.io/badge/MongoDB-7.0+-47A248)
 ![Ollama](https://img.shields.io/badge/Ollama-local--inference-black)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D4)
-![Tests](https://img.shields.io/badge/tests-49%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-300%20passing-brightgreen)
 ![Maintained](https://img.shields.io/badge/maintained-yes-brightgreen)
 
 A full-stack child safety platform that detects and alerts parents when children attempt to "hop" from moderated gaming environments to unmoderated external platforms in real time.
@@ -18,9 +18,10 @@ HopMap monitors a child's Windows gaming session and uses LLM-powered classifica
 - **Desktop Agent** — Lightweight Windows sensor using Win32 hooks, Tesseract OCR, and clipboard monitoring with no local LLM overhead
 - **Classification Server** — FastAPI backend that runs Ollama locally for URL/context classification, keeping all AI inference off the child's machine
 - **Blocked-Words Filter** — Aho-Corasick multi-pattern filter that intercepts known harmful words and phrases before any LLM call, supporting special characters (`18+`) and Unicode scripts (Hebrew)
+- **Parent Auth** — JWT access tokens (15 min) + httpOnly refresh token cookies (30 days) with bcrypt password hashing and SHA-256 agent token storage
 - **Parent Dashboard** — React frontend with live SSE event streaming, child profiles, alert history, and whitelist/blacklist management
-- **MongoDB Database** — Persistent storage for hop events, session history, per-child settings, whitelists, and blacklists
-- **Test Suite** — 49 passing tests across unit and integration layers covering the filter engine, platform loader, classify endpoint, and words CRUD API
+- **MongoDB Database** — Persistent storage for hop events, children, auth sessions, notifications, and blocked words
+- **Test Suite** — 300 passing tests across unit, integration, and E2E layers
 
 ## 🚀 Quick Start
 
@@ -29,16 +30,15 @@ HopMap monitors a child's Windows gaming session and uses LLM-powered classifica
 ```bash
 # Python 3.10+, Node.js 18+, MongoDB running locally or on Atlas
 # Ollama desktop client installed and running
-ollama pull llama3
+ollama pull qwen2.5:7b
 ```
 
 ### Setup & Run
 
-1. **Configure the server** (copy and fill in your values):
-   ```bash
-   cd server
-   cp .env.example .env
-   # Set MONGO_URI, OLLAMA_MODEL, etc.
+1. **Configure the server** — edit `server/server_config.json` for operational settings, then create `server/.env` for secrets:
+   ```
+   HOPMAP_SERVER__DB__MONGO_URI=mongodb://localhost:27017
+   HOPMAP_SERVER__AUTH__JWT_SECRET=your-secret-here
    ```
 
 2. **Start the server**:
@@ -64,89 +64,130 @@ ollama pull llama3
    ```
 
 5. **Open the parent dashboard**:
-   Navigate to `http://localhost:5173` and add a child profile to begin monitoring.
+   Navigate to `http://localhost:5173`, register an account, and add a child profile to begin monitoring.
 
 ## 📐 Architecture
 
 ```
-┌──────────────────────┐        ┌─────────────────────────┐        ┌─────────────────┐
-│  Kid's Gaming PC     │        │  HopMap Server           │        │  Parent Browser │
-│                      │        │  (FastAPI :8000)         │        │                 │
-│  Desktop Agent       │───────▶│  POST /agent/classify    │        │  React Dashboard│
-│  - Win32 hook        │        │  POST /agent/hop/{id}    │───────▶│  GET /stream/   │
-│  - OCR (Tesseract)   │        │  GET  /stream/{child_id} │  SSE   │  {child_id}     │
-│  - Clipboard monitor │        │  REST /api/*             │        │                 │
-└──────────────────────┘        └────────────┬────────────┘        └─────────────────┘
-                                             │
-                                             ▼
-                                   ┌─────────────────┐     ┌──────────────────┐
-                                   │  Ollama (local) │     │  MongoDB         │
-                                   │  LLM inference  │     │  - hop_events    │
-                                   │  qwen2.5:7b     │     │  - children      │
-                                   │  (or llama3)    │     │  - settings      │
-                                   └─────────────────┘     └──────────────────┘
+┌──────────────────────┐        ┌─────────────────────────────┐        ┌─────────────────┐
+│  Kid's Gaming PC     │        │  HopMap Server (FastAPI :8000)│        │  Parent Browser │
+│                      │        │                              │        │                 │
+│  Desktop Agent       │───────▶│  POST /agent/classify        │        │  React Dashboard│
+│  - Win32 hook        │        │  POST /agent/hop/{id}        │───────▶│  GET /stream/   │
+│  - OCR (Tesseract)   │        │  GET  /stream/{child_id}     │  SSE   │  {child_id}     │
+│  - Clipboard monitor │        │  REST /auth/*  /api/*        │        │  JWT auth       │
+└──────────────────────┘        └───────────────┬─────────────┘        └─────────────────┘
+                                                │
+                         ┌──────────────────────┼────────────────────┐
+                         ▼                      ▼                    ▼
+               ┌──────────────────┐  ┌──────────────────┐  ┌────────────────┐
+               │  Ollama (local)  │  │  MongoDB          │  │  Aho-Corasick  │
+               │  LLM inference   │  │  - auth/sessions  │  │  Words Filter  │
+               │  qwen2.5:7b      │  │  - children       │  │  (pre-LLM)     │
+               └──────────────────┘  │  - events         │  └────────────────┘
+                                     │  - notifications  │
+                                     │  - words          │
+                                     └──────────────────┘
 ```
 
 ### Component Flow
 
 1. **Agent** detects a candidate URL via OCR screenshot, clipboard poll, or window title
-2. **Agent → Server** sends context snippet to `POST /agent/classify`; server runs the local Ollama model and returns `{ decision, confidence, reason }`
+2. **Agent → Server** sends context snippet to `POST /agent/classify`; server runs the blocked-words filter first (O(n) Aho-Corasick pass), then the local Ollama model if no match, and returns `{ decision, confidence, reason, via }`
 3. **Agent** observes the subsequent app-switch and confirms the hop tier (`app_match`, `title_match`, or `switch_only`)
-4. **Agent → Server** reports the confirmed hop via `POST /agent/hop/{child_id}`; server persists the event to MongoDB
+4. **Agent → Server** reports the confirmed hop via `POST /agent/hop/{child_id}`; server persists the event to MongoDB and creates a parent notification
 5. **Server → Dashboard** pushes the event over SSE to all connected parent browsers watching that child
 
 ## 📁 Project Structure
 
 ```
 hop-map-repo/
-├── agent/                          # Windows desktop sensor
-│   ├── agent.py                    # Main agent — Win32 hooks, OCR, clipboard, classification
-│   ├── config.py                   # Agent configuration (server URL, thresholds)
-│   ├── agent_config.json           # Runtime config (loaded by config.py)
-│   └── requirements.txt
-│
-├── server/                         # FastAPI classification & event server
-│   ├── server.py                   # App entry point — all routes and SSE streaming
-│   ├── db.py                       # MongoDB connection pool & repository helpers
-│   ├── config.py                   # Server configuration (env-var driven)
-│   ├── colors.py                   # Terminal colour helpers
-│   ├── words_filter.py             # Aho-Corasick multi-pattern blocked-words filter
-│   ├── server_config.json          # Runtime config (loaded by config.py)
+├── agent/                              # Windows desktop sensor
+│   ├── agent.py                        # Main agent — Win32 hooks, OCR, clipboard, classify
+│   ├── config.py                       # AgentConfig (pydantic-settings)
+│   ├── agent_config.json               # Runtime config (backend_url, scan tuning)
 │   ├── requirements.txt
-│   ├── data/
-│   │   ├── hopmap_words_db.xlsx    # Blocked words & phrases source (seeded into MongoDB)
-│   │   └── platforms_db.xlsx       # Platform → process mappings (served to agents)
-│   ├── llm/                        # LLM provider abstraction
-│   │   ├── __init__.py             # Factory — get_provider()
-│   │   ├── base.py                 # Abstract LLMProvider base class
-│   │   └── ollama_provider.py      # Ollama local inference (qwen2.5:7b / llama3)
 │   └── tests/
-│       ├── conftest.py             # Shared fixtures (live server, file paths)
-│       ├── test_helpers.py         # Shared test utilities
-│       ├── unit_tests/
-│       │   ├── test_words_filter.py    # check_blocked_words() unit tests
-│       │   ├── test_platforms_loader.py
-│       │   └── words_db_tests.py       # Manual integration tests (requires live server)
-│       └── integration_tests/
-│           ├── test_classify_endpoint.py
-│           └── test_words_endpoints.py
+│       ├── conftest.py                 # Windows-only stub injection
+│       ├── test_classify_agent.py      # 10 tests
+│       ├── test_config.py              # 10 tests
+│       ├── test_game_detection.py      # 16 tests
+│       ├── test_platform_fetch.py      # 11 tests
+│       ├── test_pure_utils.py          # 22 tests
+│       └── test_ttl_cache.py           # 9 tests
 │
-├── dashboard/                      # React parent dashboard (Vite)
-│   ├── index.html
+├── server/                             # FastAPI server
+│   ├── server.py                       # App entry-point — routers, lifespan, CORS
+│   ├── config.py                       # ServerConfig (pydantic-settings, layered)
+│   ├── server_config.json              # Operational defaults
+│   ├── words_filter.py                 # Aho-Corasick multi-pattern blocked-words filter
+│   ├── colors.py                       # Terminal colour helpers
+│   ├── requirements.txt
+│   ├── auth/                           # JWT auth, bcrypt, refresh tokens
+│   │   ├── router.py                   # POST /auth/register|login|refresh|logout, GET /auth/me
+│   │   ├── schemas.py
+│   │   ├── service.py
+│   │   ├── repository.py
+│   │   ├── security.py                 # bcrypt + SHA-256 helpers
+│   │   └── dependencies.py            # get_current_user, get_agent_child
+│   ├── children/                       # Child profile management
+│   │   ├── router.py                   # GET/POST /api/children, PATCH /api/children/{id}
+│   │   ├── schemas.py
+│   │   ├── service.py
+│   │   └── repository.py
+│   ├── classify/                       # LLM classification & hop recording
+│   │   ├── router.py                   # POST /agent/classify, POST /agent/hop/{id}
+│   │   ├── schemas.py
+│   │   └── service.py                  # Per-child rate limiter (30 RPM)
+│   ├── events/                         # SSE streaming & event history
+│   │   ├── router.py                   # GET /stream/{id}, GET/DELETE /api/events/{id}
+│   │   ├── service.py
+│   │   └── repository.py
+│   ├── notifications/                  # Parent alert inbox
+│   │   ├── router.py                   # GET /api/notifications, PATCH …/{id}/read
+│   │   └── repository.py
+│   ├── platforms/                      # Platform→process mappings
+│   │   ├── router.py                   # GET /api/platforms
+│   │   └── service.py                  # Loads platforms_db.xlsx, serves to agents
+│   ├── words/                          # Blocked words CRUD
+│   │   ├── router.py                   # GET/POST/DELETE /api/words, POST /api/words/reload
+│   │   ├── schemas.py
+│   │   ├── service.py
+│   │   └── repository.py
+│   ├── core/
+│   │   ├── database.py                 # DatabasePool (PyMongo connection pool)
+│   │   └── validators.py               # Child ID validation helpers
+│   ├── llm/
+│   │   ├── base.py                     # Abstract LLMProvider
+│   │   ├── ollama_provider.py          # Ollama inference (qwen2.5:7b default)
+│   │   └── __init__.py                 # get_provider() factory
+│   ├── data/
+│   │   ├── hopmap_words_db.xlsx        # Blocked words seed data
+│   │   └── platforms_db.xlsx           # Platform→process mappings
+│   └── tests/
+│       ├── conftest.py                 # Session fixtures, mongomock, auth overrides
+│       ├── test_helpers.py
+│       ├── e2e/
+│       │   └── test_full_hop_flow.py   # 11 tests — full classify→hop→SSE flow
+│       ├── integration_tests/          # 7 files — endpoint tests via httpx
+│       └── unit_tests/                 # 8 files — filter, auth, DB, LLM, rate limiter
+│
+├── dashboard/                          # React + Vite parent dashboard
+│   ├── src/
+│   │   ├── App.jsx                     # Router, child state, /api/children fetch
+│   │   ├── components/
+│   │   │   ├── Homepage.jsx            # Live SSE timeline, date filter
+│   │   │   ├── Kids.jsx                # Child profile management
+│   │   │   ├── Alerts.jsx              # Full event history with risk badges
+│   │   │   ├── Sidebar.jsx             # Navigation
+│   │   │   └── settings.jsx            # Reserved for future settings
+│   │   └── utils/
+│   │       └── eventHelpers.jsx        # Formatters, icons, severity helpers
 │   ├── package.json
-│   ├── vite.config.js
-│   └── src/
-│       ├── App.jsx                 # Root component — routing & child state
-│       ├── main.jsx
-│       ├── components/
-│       │   ├── Homepage.jsx        # Live event timeline + SSE connection
-│       │   ├── Kids.jsx            # Child profile management
-│       │   ├── Alerts.jsx          # Alert history with date filtering
-│       │   ├── Sidebar.jsx         # Navigation sidebar
-│       │   └── settings.jsx        # Per-child settings, whitelist, blacklist
-│       └── utils/
-│           └── eventHelpers.jsx    # Shared formatters and icon helpers
+│   └── vite.config.js
 │
+├── conftest.py                         # Root conftest — anchors pytest rootdir
+├── pytest.ini                          # asyncio_mode = auto
 └── Readme.md
 ```
 
@@ -154,18 +195,17 @@ hop-map-repo/
 
 ### 1. Desktop Agent (`agent/`)
 
-A lightweight Windows-only sensor that runs on the child's PC. It performs no LLM work locally — all classification is delegated to the server, keeping gaming performance unaffected.
+A lightweight Windows-only sensor that runs on the child's PC. All LLM classification is delegated to the server, keeping gaming performance unaffected.
 
 **Detection Pipeline:**
 
 | Layer | Mechanism | Description |
 |-------|-----------|-------------|
-| Layer 0 | Win32 `SetWinEventHook` | Fires on every foreground-window change; raw HWNDs are queued and returned immediately |
-| Layer 1 | Event-processor thread | Drains the HWND queue; drives scanner lifecycle and hop confirmation logic |
-| Layer 2 | OCR scanner (Tesseract + mss) | Periodically screenshots the active game window and extracts URL candidates |
-| Layer 3 | Clipboard monitor | Polls the system clipboard every second — catches "copy this link" lures invisible to OCR |
-| Layer 4 | Server classification | POSTs each new URL (TTL-deduplicated) to `/agent/classify`; skips gracefully if server is unreachable |
-| Layer 5 | Hop confirmation | On app-switch away from the game, assigns one of three click-confidence tiers |
+| Layer 1 | Win32 `SetWinEventHook` | Fires on every foreground-window change; HWNDs queued immediately |
+| Layer 2 | Event-processor thread | Drains the HWND queue; drives scanner lifecycle and hop confirmation |
+| Layer 3 | OCR scanner (Tesseract + mss) | Screenshots active game window every ~5 sec; extracts URL candidates |
+| Layer 4 | Clipboard monitor | Polls clipboard every ~1 sec — catches "copy this link" lures invisible to OCR |
+| Layer 5 | Classification & confirmation | TTL-deduplicates URLs, POSTs to `/agent/classify`, confirms hop tier on next app-switch |
 
 **Confirmation Tiers:**
 
@@ -175,127 +215,146 @@ A lightweight Windows-only sensor that runs on the child's PC. It performs no LL
 | `title_match` | A browser navigated to the lure domain (title poll) |
 | `switch_only` | An app switch occurred but no stronger signal was available |
 
+**Platform defaults (used if server unreachable):** Discord, Telegram, WhatsApp, Signal, Snapchat, Instagram, TikTok, YouTube, Twitch — plus common browsers (Chrome, Edge, Firefox, Opera, Brave, Vivaldi).
+
 ### 2. Classification Server (`server/`)
 
-A FastAPI application that runs on the parent's network. It exposes endpoints for the agent, a real-time SSE stream for the dashboard, and REST management APIs.
+A FastAPI application that runs on the parent's network. Provides endpoints for the agent, real-time SSE for the dashboard, and REST management APIs.
 
-**Blocked-Words Filter (`server/words_filter.py`):**
+**Classification Flow:**
 
-Before every LLM call, the server scans the context snippet through a `WordsFilter` backed by an [Aho-Corasick](https://en.wikipedia.org/wiki/Aho%E2%80%93Corasick_algorithm) automaton. This catches known bad phrases and words in a single O(n) pass — no regex tokenization, correct for all character sets including Hebrew and special-char entries like `18+`. Only if no match is found does the request proceed to Ollama.
+1. Context snippet arrives at `POST /agent/classify`
+2. `check_blocked_words()` runs an O(n) Aho-Corasick scan — supports phrases, special chars, Unicode
+3. If a blocked word/phrase matches → immediately return `{ decision: YES, via: word_db }` (no LLM call)
+4. Otherwise → forward to Ollama; return `{ decision, confidence, reason, via: server }`
 
-**Key Endpoints:**
+**All Endpoints:**
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/agent/classify` | Classify a URL + context snippet with the local Ollama model |
-| `POST` | `/agent/hop/{child_id}` | Record a confirmed hop event for a child |
-| `GET` | `/stream/{child_id}` | Server-Sent Events stream of live hop events for the dashboard |
-| `GET` | `/health` | Server and database health check |
-| `GET` | `/api/children` | List all registered child profiles |
-| `POST` | `/api/children` | Register a new child profile |
-| `PATCH` | `/api/children/{child_id}` | Rename an existing child |
-| `GET` | `/api/events/{child_id}` | Fetch hop event history for a child |
-| `DELETE` | `/api/events/{child_id}` | Clear all stored events for a child |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/auth/register` | — | Register parent account → access token + refresh cookie |
+| `POST` | `/auth/login` | — | Login → access token + refresh cookie |
+| `POST` | `/auth/refresh` | Cookie | Rotate refresh token → new access token |
+| `POST` | `/auth/logout` | Cookie | Revoke refresh token |
+| `GET` | `/auth/me` | Bearer | Current parent profile |
+| `GET` | `/api/children` | Bearer | List parent's children |
+| `POST` | `/api/children` | Bearer | Register child → `{ childId, agentToken }` |
+| `PATCH` | `/api/children/{child_id}` | Bearer | Rename child |
+| `POST` | `/agent/classify` | Agent token | Classify URL + context snippet |
+| `POST` | `/agent/hop/{child_id}` | Agent token | Record confirmed hop event |
+| `GET` | `/stream/{child_id}` | — | SSE stream of live hop events |
+| `GET` | `/api/events/{child_id}` | Bearer | Event history (with `?limit=`) |
+| `DELETE` | `/api/events/{child_id}` | Bearer | Clear child's event history |
+| `GET` | `/api/notifications` | Bearer | Parent alert inbox (with `?unread=`) |
+| `PATCH` | `/api/notifications/{id}/read` | Bearer | Mark notification as read |
+| `GET` | `/api/platforms` | — | Platform→process mappings for agents |
+| `GET` | `/api/words` | Bearer | List blocked words |
+| `POST` | `/api/words` | Bearer | Add a blocked word/phrase |
+| `DELETE` | `/api/words/{word}` | Bearer | Remove a blocked word |
+| `POST` | `/api/words/reload` | Bearer | Force reload from MongoDB |
+| `GET` | `/api/demo/seed` | — | Seed demo data (only when `demo_mode=true`) |
 
-**Key Features:**
-- Per-child async rate limiter prevents agent flooding of the classifier
-- Ollama runs entirely on the server — zero AI load on the child's gaming machine
-- SSE push ensures the parent dashboard updates instantly without polling
-- MongoDB connection pool with graceful startup fallback
+### 3. Auth System (`server/auth/`)
 
-### 3. LLM Provider (`server/llm/`)
-
-A pluggable provider abstraction for classification inference.
-
-| Module | Description |
-|--------|-------------|
-| `base.py` | Abstract `LLMProvider` with `classify(context, system_prompt) → dict` |
-| `ollama_provider.py` | Calls a locally running Ollama model (`qwen2.5:7b` default); returns `{ decision, confidence, reason }` |
-| `__init__.py` | `get_provider()` factory — selects provider from `OLLAMA_MODEL` env-var |
-
-The classification prompt catches explicit URLs, bare platform usernames, and invitation-style phrasing ("DM me on insta") — not just raw links.
+| Credential | Lifetime | Storage |
+|-----------|----------|---------|
+| Access token (JWT HS256) | 15 min | Bearer header |
+| Refresh token (64-char hex) | 30 days | httpOnly cookie; SHA-256 hash in MongoDB |
+| Agent token (64-char hex) | Permanent | SHA-256 hash in child record; raw shown to parent once |
+| Password | — | bcrypt |
 
 ### 4. Parent Dashboard (`dashboard/`)
 
-A React + Vite single-page application for parents.
-
-**Key Views:**
-
 | Component | Description |
 |-----------|-------------|
-| `Homepage.jsx` | Live event timeline connected via SSE; date-filtered history; child selector |
-| `Kids.jsx` | Add, rename, and manage child profiles |
-| `Alerts.jsx` | Full alert history with event details and timestamps |
-| `settings.jsx` | Per-child settings page (currently empty, reserved for future configuration) |
-| `Sidebar.jsx` | Navigation and active-child indicator |
+| `Homepage.jsx` | Live SSE timeline for selected child; DD/MM/YYYY date filter; platform count; "live" indicator |
+| `Kids.jsx` | Add, rename, and list child profiles via `/api/children` |
+| `Alerts.jsx` | Full event history with risk badges (SAFE / WARNING / HIGH RISK) |
+| `Sidebar.jsx` | Navigation between Live Map and Kids views |
+| `settings.jsx` | Reserved for future per-child configuration |
 
 ## ⚙️ Configuration
 
-### Server Configuration
+### Server
 
-Create `server/.env` from `.env.example`:
+Edit `server/server_config.json` for operational settings. Put secrets in `server/.env`:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HOST` | `0.0.0.0` | Server bind address |
-| `PORT` | `8000` | Server HTTP port |
-| `MONGO_URI` | `mongodb://localhost:27017` | MongoDB connection string (local or Atlas) |
-| `DB_NAME` | `hopmap` | MongoDB database name |
-| `OLLAMA_MODEL` | `qwen2.5:7b` | Ollama model tag for classification (e.g. `llama3`, `mistral`, `gemma3` — or any model you have pulled locally) |
+| Env variable | Default | Description |
+|-------------|---------|-------------|
+| `HOPMAP_SERVER__DB__MONGO_URI` | `mongodb://localhost:27017` | MongoDB URI (local or Atlas) |
+| `HOPMAP_SERVER__AUTH__JWT_SECRET` | `change-me-in-production` | HS256 signing secret — **always override** |
+| `HOPMAP_SERVER__AUTH__REFRESH_COOKIE_SECURE` | `false` | Set `true` in production (requires HTTPS) |
+| `HOPMAP_SERVER__NETWORK__CORS_ORIGINS` | `["*"]` | Comma-separated allowed origins |
+| `HOPMAP_SERVER__LLM__MODEL` | `qwen2.5:7b` | Ollama model tag |
+| `HOPMAP_SERVER__CLASSIFY_MAX_RPM` | `30` | Max classify requests per child per minute |
+| `HOPMAP_SERVER__DEMO_MODE` | `false` | Expose demo seeding endpoint |
 
-> To use MongoDB Atlas instead of a local instance, set `MONGO_URI` to your Atlas connection string — no other changes required.
+Config priority (highest first): environment variables → `.env` file → `server_config.json` → field defaults.
 
-### Agent Configuration
+> To use MongoDB Atlas, set `HOPMAP_SERVER__DB__MONGO_URI` to your Atlas connection string — no other changes required.
 
-Create `agent/.env` from `.env.example`:
+### Agent
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BACKEND_URL` | `http://localhost:8000` | HopMap server base URL |
-| `OLLAMA_MODEL` | `qwen2.5:7b` | Ollama model tag (fallback, if server is unreachable) |
-| `SCAN_INTERVAL_SECONDS` | `5` | How often to OCR-scan the game window for links |
-| `CONTEXT_LINES` | `10` | Chat lines around a detected URL sent to the classifier |
+Edit `agent/agent_config.json` for deployment settings:
+
+| Field / Env variable | Default | Description |
+|---------------------|---------|-------------|
+| `backend_url` / `HOPMAP_AGENT_BACKEND_URL` | `http://localhost:8000` | HopMap server URL |
+| `ollama_model` / `HOPMAP_AGENT_OLLAMA_MODEL` | `qwen2.5:7b` | Ollama model (fallback) |
+| `scan_interval_seconds` / `HOPMAP_AGENT_SCAN_INTERVAL_SECONDS` | `5.0` | OCR scan frequency (seconds) |
+| `context_lines` / `HOPMAP_AGENT_CONTEXT_LINES` | `10` | Chat lines sent with each classify request |
 
 ## 🧪 Testing
 
-The server has a full test suite with **49 tests** across unit and integration layers, all passing with 0 expected failures.
+300 tests passing across unit, integration, and E2E layers with 0 failures.
 
 ### Running Tests
 
 ```bash
-cd server
-pip install -r requirements.txt
-python -m pytest tests/ -v
+# From repo root — runs all agent + server tests
+python -m pytest
+
+# Server tests only
+python -m pytest server/tests/ -v
+
+# Agent tests only
+python -m pytest agent/tests/ -v
 ```
 
 ### Test Structure
 
 ```
-server/tests/
-├── conftest.py                          # Shared fixtures (live server, data file paths)
-├── test_helpers.py                      # Shared test utilities and constants
-├── unit_tests/
-│   ├── test_words_filter.py             # check_blocked_words() — 19 tests
-│   ├── test_platforms_loader.py         # Platform DB loader — 11 tests
-│   └── words_db_tests.py               # Manual integration tests (requires live server)
-└── integration_tests/
-    ├── test_classify_endpoint.py        # /agent/classify endpoint — 4 tests
-    └── test_words_endpoints.py         # /api/words CRUD — 9 tests
+agent/tests/                    78 tests
+├── test_classify_agent.py      10 — LLM happy/error paths, response parsing
+├── test_config.py              10 — defaults, URL normalisation, JSON loading
+├── test_game_detection.py      16 — Epic/Riot/Registry detection, caching
+├── test_platform_fetch.py      11 — server fetch, fallback on errors, registration
+├── test_pure_utils.py          22 — URL regex, domain parsing, context extraction
+└── test_ttl_cache.py            9 — TTL cache ops, expiry, size bound, thread safety
+
+server/tests/                  222 tests
+├── e2e/
+│   └── test_full_hop_flow.py       11 — classify→hop→events→SSE full flow
+├── integration_tests/
+│   ├── test_children_endpoints.py  10 — child CRUD, agent token
+│   ├── test_classify_endpoint.py    4 — word_db fast path, LLM path, 18+, Hebrew
+│   ├── test_events_endpoints.py    11 — event history, delete, count
+│   ├── test_hop_endpoint.py         6 — hop recording, notification creation
+│   ├── test_platforms_endpoint.py   6 — platform map serving
+│   ├── test_sse_stream.py           4 — SSE connection, event delivery
+│   └── test_words_endpoints.py      9 — words CRUD, duplicate, normalise, reload
+└── unit_tests/
+    ├── test_auth.py               36 — JWT, bcrypt, token rotation, cookie handling
+    ├── test_db_unit.py            67 — connection pool, ping, collection helpers
+    ├── test_llm_base.py           16 — LLM provider abstraction, classify contract
+    ├── test_platforms_loader.py   15 — Excel loader, fallback, synthetic fixtures
+    ├── test_rate_limiter.py        6 — per-child RPM enforcement
+    └── test_words_filter.py       21 — Aho-Corasick: boundary, phrase, Unicode, 18+
 ```
-
-### Test Categories
-
-| Category | File | Tests | Description |
-|----------|------|-------|-------------|
-| Words filter unit | `test_words_filter.py` | 19 | `check_blocked_words()` with injected word sets; includes phrase matching, boundary checks, Unicode, and real-DB spot checks |
-| Platforms loader unit | `test_platforms_loader.py` | 11 | `_load_platforms_db()` with synthetic Excel fixtures and the real file |
-| Classify endpoint | `test_classify_endpoint.py` | 4 | Full HTTP flow: word-DB fast path (`via=word_db`), LLM fallback path, `18+`, and Hebrew |
-| Words endpoints | `test_words_endpoints.py` | 9 | `/api/words` CRUD: add, duplicate, normalise, delete, reload |
-| **Total** | | **49** | **0 expected failures** |
 
 ### Example Test Scenarios
 
-**Word-boundary protection** — `hack` is blocked but `hackle` is not:
+**Word-boundary protection** — `hack` blocked, `hackle` not:
 ```python
 def test_blocked_word_inside_longer_word_not_matched(self, monkeypatch):
     _set_words(monkeypatch, {"hack"})
@@ -303,37 +362,39 @@ def test_blocked_word_inside_longer_word_not_matched(self, monkeypatch):
     assert found is False
 ```
 
-**Special-char entry (`18+`)** — previously xfail, now passing via Aho-Corasick:
+**Special-char entry (`18+`)** — Aho-Corasick handles non-word characters:
 ```python
 def test_18plus_blocked(self):
     found, _ = check_blocked_words("check out this 18+ content")
     assert found is True
 ```
 
-**Hebrew blocked phrase** — prefix-attached Hebrew matched correctly:
+**Hebrew blocked phrase** — Unicode script matched in full server flow:
 ```python
-def test_hebrew_blocked_word_in_discord_context(self, live_server, child_id):
-    res = requests.post(f"{live_server}/agent/classify",
+def test_hebrew_blocked_word_in_discord_context(self, ...):
+    res = client.post("/agent/classify",
         json={"context": "בוא לדיסקורד שלי אחי", ...})
     assert res.json()["via"] == "word_db"
 ```
 
-**Longest-match wins** — more specific phrase takes priority over a shorter contained word:
+**Longest-match wins** — more specific phrase preferred over shorter contained word:
 ```python
 def test_longest_phrase_matched_first(self, monkeypatch):
     _set_words(monkeypatch, {"tell your parents", "don't tell your parents"})
     found, matched = check_blocked_words("please don't tell your parents about this")
-    assert matched == "don't tell your parents"  # longer phrase wins
+    assert matched == "don't tell your parents"
 ```
 
-**Live server fixture** — integration tests spin up a real FastAPI + uvicorn instance on a free port, run the tests, then tear it down. No mocks, no hardcoded ports:
+**Global test fixture** — `mongomock` replaces MongoDB, auth overrides skip JWT validation, LLM is mocked:
 ```python
-@pytest.fixture(scope="session")
-def live_server():
-    port = find_free_port()
-    thread = threading.Thread(target=uvicorn.run, kwargs={...}, daemon=True)
-    thread.start()
-    # wait for ready, yield base URL, cleanup on session end
+@pytest.fixture(scope="session", autouse=True)
+def _global_test_setup():
+    mock_client = mongomock.MongoClient()
+    _db_mod._pool._client = mock_client
+    _db_mod._pool._db = mock_client[_db_mod._pool.db_name]
+    ...
+    app.dependency_overrides[get_current_user] = _mock_current_user
+    app.dependency_overrides[get_agent_child] = _mock_agent_child
 ```
 
 ---
@@ -343,30 +404,34 @@ def live_server():
 - **Local LLM Only** — All AI inference runs on the server machine; no data is sent to third-party AI services
 - **No Cloud Dependency** — Works fully offline on a local network (Ollama + local MongoDB)
 - **Minimal Agent Footprint** — The desktop agent sends only small context snippets (a few lines of chat + detected URL), not full screen captures
-- **Rate Limiting** — A per-child async rate limiter is enforced on the classify endpoint to prevent abuse
-- **Graceful Degradation** — If the server is unreachable, the agent treats URLs as safe and skips them rather than blocking the child's session
+- **JWT + Refresh Tokens** — Short-lived access tokens (15 min) with httpOnly refresh cookies; SHA-256 hashing prevents rainbow table attacks on stored tokens
+- **Rate Limiting** — A per-child async rate limiter (30 RPM default) is enforced on the classify endpoint
+- **Graceful Degradation** — If the server is unreachable, the agent skips classification and treats the URL as safe rather than blocking the child's session
 
 ## 📦 Dependencies
 
 ```
 # Server
-fastapi
-uvicorn[standard]
-ollama
-pymongo>=4.6.0
-python-dotenv
-pydantic>=2.0.0
+fastapi>=0.110.0
+uvicorn>=0.27.0
+pymongo[srv]>=4.6.0
+pydantic-settings>=2.2.0
+ollama>=0.1.7
+openpyxl>=3.1.0
 pyahocorasick>=1.4.0
+bcrypt>=4.0.0
+python-jose[cryptography]>=3.3.0
+python-multipart>=0.0.9
 
 # Agent (Windows only)
-pywin32
-psutil
-requests
-python-dotenv
-mss
-pytesseract
-Pillow
-pyperclip
+pywin32>=306
+psutil>=5.9.0
+requests>=2.31.0
+pydantic-settings>=2.2.0
+mss>=9.0.0
+pytesseract>=0.3.13
+Pillow>=10.0.0
+pyperclip>=1.9.0
 
 # Frontend
 react >= 18
@@ -378,4 +443,3 @@ vite
 - [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) — Required on the agent machine for screenshot-based detection
 
 **Python Requirements:** >= 3.10
-
