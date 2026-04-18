@@ -22,6 +22,7 @@ def create_user(email: str, password_hash: str, display_name: str) -> str:
         "passwordHash": password_hash,
         "displayName": display_name,
         "emailVerified": False,
+        "maxChildren": 0,
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "deletedAt": None,
     })
@@ -69,6 +70,16 @@ def revoke_session(token_hash: str) -> None:
         {"tokenHash": token_hash},
         {"$set": {"revokedAt": datetime.now(timezone.utc)}},
     )
+
+
+def update_max_children(user_id: str, max_children: int) -> None:
+    try:
+        _col_users().update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"maxChildren": max_children}},
+        )
+    except InvalidId:
+        pass
 
 
 def initialize_indexes() -> None:

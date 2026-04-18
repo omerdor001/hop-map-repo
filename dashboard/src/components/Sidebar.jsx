@@ -6,7 +6,8 @@ const sideNav = [
     { icon: "🗺️", label: "Live Map", path: "/", badge: null },
   ]},
   { section: "ACCOUNT", items: [
-    { icon: "👦", label: "Kids", path: "/kids", badge: null },
+    { icon: "👦", label: "Kids",  path: "/kids",  badge: null },
+    { icon: "💳", label: "Plan",  path: "/plan",  badge: null },
   ]},
 ]
 
