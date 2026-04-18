@@ -64,6 +64,17 @@ class LLMConfig(BaseModel):
     model: str = Field("qwen2.5:7b", description="Model name passed to the provider")
 
 
+class AuthConfig(BaseModel):
+    """JWT and session configuration."""
+
+    jwt_secret: str = Field("change-me-in-production", description="HS256 signing secret — override via HOPMAP_SERVER__AUTH__JWT_SECRET env var")
+    jwt_algorithm: str = Field("HS256", description="JWT signing algorithm")
+    access_token_expire_minutes: int = Field(15, description="Access token lifetime in minutes", gt=0)
+    refresh_token_expire_days: int = Field(30, description="Refresh token lifetime in days", gt=0)
+    refresh_cookie_name: str = Field("hopmap_refresh", description="Name of the httpOnly refresh token cookie")
+    refresh_cookie_secure: bool = Field(False, description="Set True in production (requires HTTPS)")
+
+
 class DataConfig(BaseModel):
     """Paths to data files loaded at server startup."""
 
@@ -83,7 +94,17 @@ class ServerConfig(BaseSettings):
     network: NetworkConfig = Field(default_factory=NetworkConfig)
     db: DatabaseConfig = Field(default_factory=DatabaseConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     data: DataConfig = Field(default_factory=DataConfig)
+
+    # Maximum classify requests per child per minute.
+    classify_max_rpm: int = Field(
+        30, description="Max classify calls per child per minute", gt=0
+    )
+
+    # Expose demo-seed endpoints (development / competition demo only).
+    # Set HOPMAP_SERVER__DEMO_MODE=true in .env to enable.
+    demo_mode: bool = Field(False, description="Expose demo seeding endpoints")
 
     @field_validator("network", mode="before")
     @classmethod

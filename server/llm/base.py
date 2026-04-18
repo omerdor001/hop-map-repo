@@ -51,8 +51,11 @@ class LLMProvider(ABC):
             r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE
         ).strip()
         data = json.loads(raw)
+        decision = str(data.get("decision", "NO")).upper()
+        if decision not in {"YES", "NO"}:
+            decision = "NO"
         return {
-            "decision":   str(data.get("decision", "NO")).upper(),
+            "decision":   decision,
             "confidence": max(0, min(100, int(data.get("confidence", 50)))),
             "reason":     str(data.get("reason", "")).strip(),
         }
