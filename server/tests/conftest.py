@@ -113,6 +113,7 @@ def _global_test_setup():
         "id": "test-parent-id",
         "email": "test@hopmap.test",
         "displayName": "Test Parent",
+        "maxChildren": 100,
     }
 
     async def _mock_current_user() -> dict:

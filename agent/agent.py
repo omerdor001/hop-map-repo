@@ -63,6 +63,7 @@ import pathlib
 import queue
 import re
 import shutil
+import sys
 import threading
 import time
 import winreg
@@ -193,59 +194,6 @@ def _configure_tesseract() -> None:
 _configure_tesseract()
 
 # ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
-CHILD_ID: str = ""  # assigned by the server on startup
-
-# File where the server-assigned child ID is persisted so the same record is
-# reused across agent restarts rather than creating a new orphaned profile.
-_CHILD_ID_FILE = pathlib.Path(__file__).parent / ".child_id"
-
-
-def _register_child() -> str:
-    """Return the persisted child ID, registering with the server if needed.
-
-    The ID is written to *_CHILD_ID_FILE* so the same child record survives
-    agent restarts — event history remains intact in the parent dashboard.
-    """
-    # ── Load a previously persisted ID ───────────────────────────────────
-    try:
-        if _CHILD_ID_FILE.exists():
-            stored = _CHILD_ID_FILE.read_text(encoding="utf-8").strip()
-            if stored:
-                log.info("Using persisted child ID %r.", stored)
-                # Notify the server we are back online; it ignores the call if
-                # the child is already registered (upsert with $setOnInsert).
-                try:
-                    requests.post(
-                        f"{config_manager.backend_url}/api/children",
-                        json={"childId": stored},
-                        timeout=5,
-                    )
-                except requests.exceptions.RequestException:
-                    pass  # offline — that's OK, we still know our ID
-                return stored
-    except OSError:
-        pass
-
-    # ── Register fresh with the server ───────────────────────────────────
-    try:
-        resp = requests.post(f"{config_manager.backend_url}/api/children", json={}, timeout=5)
-        resp.raise_for_status()
-        assigned = resp.json()["childId"]
-        log.info("Server assigned child ID %r.", assigned)
-        try:
-            _CHILD_ID_FILE.write_text(assigned, encoding="utf-8")
-        except OSError as exc:
-            log.warning("Could not persist child ID to disk: %s", exc)
-        return assigned
-    except requests.exceptions.RequestException as exc:
-        log.warning("Could not reach server for registration: %s", exc)
-        return "child-unknown"
-
-
-# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 # Named logger with its own handler so that third-party libraries (httpx,
@@ -264,6 +212,90 @@ if not log.handlers:
         )
     )
     log.addHandler(_handler)
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+CHILD_ID: str = ""  # assigned by the server on startup
+
+# File where the server-assigned child ID is persisted so the same record is
+# reused across agent restarts rather than creating a new orphaned profile.
+_CHILD_ID_FILE = pathlib.Path(__file__).parent / ".child_id"
+
+
+def _register_child() -> str:
+    """Resolve this agent's child ID.
+
+    Resolution order (highest priority first):
+      1. ``GET /agent/me`` — server is authoritative; catches revoked tokens.
+      2. Cached ``.child_id`` file — offline resilience across restarts.
+
+    If the agent token is missing, the function prints a human-readable
+    setup message and exits immediately (fail-fast) rather than producing
+    orphaned events attributed to an unknown child.
+    """
+    if not config_manager.agent_token:
+        print(
+            "\n"
+            "  HopMap Agent — setup required\n"
+            "  ─────────────────────────────\n"
+            "  No agent token found in agent_config.json.\n"
+            "  1. Open the parent dashboard.\n"
+            "  2. Go to Kids → Add child.\n"
+            "  3. Copy the token shown after creation.\n"
+            "  4. Paste it into agent_config.json as \"agent_token\".\n",
+            flush=True,
+        )
+        sys.exit(1)
+
+    # ── Try the server first (authoritative) ─────────────────────────────
+    headers = {"Authorization": f"Bearer {config_manager.agent_token}"}
+    try:
+        resp = requests.get(
+            f"{config_manager.backend_url}/agent/me",
+            headers=headers,
+            timeout=5,
+        )
+        resp.raise_for_status()
+        child_id: str = resp.json()["childId"]
+        log.info("Child ID %r confirmed by server.", child_id)
+        try:
+            _CHILD_ID_FILE.write_text(child_id, encoding="utf-8")
+        except OSError as exc:
+            log.warning("Could not persist child ID: %s", exc)
+        return child_id
+    except requests.exceptions.HTTPError as exc:
+        # 401/403 = token is invalid or revoked — stale cache cannot be trusted
+        status = exc.response.status_code if exc.response is not None else 0
+        if status in (401, 403):
+            log.error(
+                "Agent token rejected by server (%d). "
+                "Re-register the child from the parent dashboard.",
+                status,
+            )
+            sys.exit(1)
+        log.warning("Server error (%d), falling back to cached ID.", status)
+    except requests.exceptions.RequestException as exc:
+        log.warning("Server unreachable, falling back to cached ID: %s", exc)
+
+    # ── Fall back to locally cached ID (offline mode) ─────────────────────
+    try:
+        if _CHILD_ID_FILE.exists():
+            cached = _CHILD_ID_FILE.read_text(encoding="utf-8").strip()
+            if cached:
+                log.info("Using cached child ID %r (offline).", cached)
+                return cached
+    except OSError as exc:
+        log.warning("Could not read cached child ID: %s", exc)
+
+    # ── No ID available — cannot continue ────────────────────────────────
+    log.error(
+        "Could not obtain child ID from server or cache. "
+        "Check that the server is running and the agent token is valid."
+    )
+    sys.exit(1)
+
 
 # ---------------------------------------------------------------------------
 # Game-process registry
