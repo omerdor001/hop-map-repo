@@ -146,3 +146,5 @@ class ServerConfig(BaseSettings):
 # ── Singleton instance ────────────────────────────────────────────────────────
 # Import this directly:  from config import server_config
 config_manager = ServerConfig()
+
+APP_VERSION = "2.0.0"

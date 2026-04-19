@@ -79,11 +79,17 @@ class TestRenameChild:
                     for c in client.get("/api/children").json()["children"]}
         assert children.get("rename-kid-2") == "Beta"
 
-    def test_rename_empty_name_returns_400(self, app_client):
+    def test_rename_empty_name_returns_422(self, app_client):
+        # Schema-level validation (min_length=1 after strip) produces 422, not 400.
+        # 422 Unprocessable Entity is the correct HTTP status for semantic
+        # validation failures on a well-formed request body (RFC 9110).
         client, _ = app_client
         client.post("/api/children", json={"childId": "rename-kid-3", "childName": "Valid"})
         resp = client.patch("/api/children/rename-kid-3", json={"childName": ""})
-        assert resp.status_code == 400
+        assert resp.status_code == 422
+        # Whitespace-only is also rejected after stripping.
+        resp2 = client.patch("/api/children/rename-kid-3", json={"childName": "   "})
+        assert resp2.status_code == 422
 
     def test_rename_invalid_child_id_format_returns_400(self, app_client):
         client, _ = app_client

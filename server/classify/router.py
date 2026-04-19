@@ -1,5 +1,4 @@
 import io
-import json
 import logging
 import pathlib
 import secrets
@@ -19,6 +18,13 @@ from children.repository import (
     upsert_setup_code,
 )
 from classify import service as classify_service
+from classify.exceptions import (
+    ClassifyError,
+    LLMInferenceError,
+    LLMResponseParseError,
+    LLMTimeoutError,
+    LLMUnavailableError,
+)
 from classify.schemas import (
     ActivateAgentRequest,
     ActivateAgentResponse,
@@ -171,12 +177,26 @@ async def agent_classify(body: ClassifyRequest, _child: dict = Depends(get_agent
 
     try:
         result = await classify_service.run_classify(body.context)
-    except json.JSONDecodeError as exc:
-        log.warning("LLM returned non-JSON for child %r: %s", body.child_id, exc)
-        return ClassifyResponse(decision="NO", confidence=0, reason="parse_error")
-    except Exception as exc:
-        log.warning("LLM error for child %r: %s", body.child_id, exc)
-        return ClassifyResponse(decision="NO", confidence=0, reason="inference_error")
+    except LLMResponseParseError as exc:
+        log.warning(
+            "LLM returned unparseable output  child=%r  raw=%r  cause=%s",
+            body.child_id, exc.raw, exc.cause,
+        )
+        return ClassifyResponse(decision="NO", confidence=0, reason="llm_parse_error")
+    except LLMUnavailableError as exc:
+        log.error("Ollama unavailable  child=%r: %s", body.child_id, exc, exc_info=True)
+        return ClassifyResponse(decision="NO", confidence=0, reason="llm_unavailable")
+    except LLMTimeoutError as exc:
+        log.warning("Ollama timed out  child=%r: %s", body.child_id, exc)
+        return ClassifyResponse(decision="NO", confidence=0, reason="llm_timeout")
+    except LLMInferenceError as exc:
+        log.error("Ollama inference error  child=%r: %s", body.child_id, exc, exc_info=True)
+        return ClassifyResponse(decision="NO", confidence=0, reason="llm_inference_error")
+    except ClassifyError as exc:
+        log.error(
+            "Unexpected classify error  child=%r: %s", body.child_id, exc, exc_info=True,
+        )
+        return ClassifyResponse(decision="NO", confidence=0, reason="llm_error")
 
     log.info(
         "Classify result  child=%r  decision=%s  confidence=%d%%  reason=%r",
