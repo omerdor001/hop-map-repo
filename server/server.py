@@ -21,7 +21,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import config_manager
+from config import APP_VERSION, config_manager
 from llm import get_provider
 
 # Feature routers
@@ -29,6 +29,7 @@ from auth.router import router as auth_router
 from children.router import router as children_router
 from classify.router import router as classify_router
 from events.router import router as events_router
+from health.router import record_startup, router as health_router
 from me.router import router as me_router
 from notifications.router import router as notifications_router
 from platforms.router import router as platforms_router
@@ -36,7 +37,6 @@ from words.router import router as words_router
 
 # Services that need lifecycle management
 from classify import service as classify_service
-from core.database import _pool as db_pool
 from events import service as event_service
 from words import service as words_service
 from platforms import service as platforms_service
@@ -80,6 +80,7 @@ async def lifespan(app: FastAPI):
     # Load platform→process mappings
     platforms_service.load_platforms_db()
 
+    record_startup()
     yield
 
     log.info("HopMap server shutting down.")
@@ -87,7 +88,7 @@ async def lifespan(app: FastAPI):
     await event_service.shutdown_all()
 
 
-app = FastAPI(title="HopMap API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="HopMap API", version=APP_VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -96,6 +97,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(children_router)
 app.include_router(classify_router)
@@ -104,12 +106,6 @@ app.include_router(me_router)
 app.include_router(notifications_router)
 app.include_router(platforms_router)
 app.include_router(words_router)
-
-
-@app.get("/health")
-def health() -> dict:
-    db_ok = db_pool.ping()
-    return {"status": "ok" if db_ok else "db_unavailable", "db": db_ok}
 
 
 if __name__ == "__main__":

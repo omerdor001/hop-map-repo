@@ -27,7 +27,4 @@ def rename_child(child_id: str, body: RenameChildRequest, current_user: dict = D
     validate_child_id(child_id)
     if not get_child_by_id(child_id, current_user["id"]):
         raise HTTPException(status_code=403, detail="Child not found or not yours.")
-    name = body.child_name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="childName must not be empty")
-    return children_service.update_child_name(child_id, name, current_user["id"])
+    return children_service.update_child_name(child_id, body.child_name, current_user["id"])

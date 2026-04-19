@@ -39,6 +39,10 @@ def get_entry_count() -> int:
     return _filter.entry_count
 
 
+def is_refresh_task_alive() -> bool:
+    return _words_refresh_task is not None and not _words_refresh_task.done()
+
+
 async def _refresh_loop() -> None:
     interval = config_manager.db.words_refresh_interval_seconds
     while True:
