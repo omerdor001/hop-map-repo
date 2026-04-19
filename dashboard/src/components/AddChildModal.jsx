@@ -174,7 +174,7 @@ function StepInstaller({ result, onDone }) {
     try {
       const params = new URLSearchParams({
         childId:    childId,
-        backendUrl: window.location.origin,
+        backendUrl: `${window.location.protocol}//${window.location.hostname}:8000`,
       })
       const res = await authFetch(`/agent/installer?${params}`)
       if (!res.ok) throw new Error(`Server returned ${res.status}`)

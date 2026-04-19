@@ -45,9 +45,9 @@ trap {{ Write-Host ""; Write-Host "  [!] Unexpected error: $_" -ForegroundColor 
 
 # -- Self-elevation -----------------------------------------------------------
 if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {{
-    Start-Process PowerShell -Verb RunAs `
+    Start-Process PowerShell -Verb RunAs -WindowStyle Normal `
         -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
-    exit
+    [System.Environment]::Exit(0)
 }}
 
 $TaskName  = "HopMap - {safe_name}"
@@ -176,9 +176,9 @@ trap {{ Write-Host ""; Write-Host "  [!] Unexpected error: $_" -ForegroundColor 
 
 # -- Self-elevation: re-launch as Administrator if needed ---------------------
 if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {{
-    Start-Process PowerShell -Verb RunAs `
+    Start-Process PowerShell -Verb RunAs -WindowStyle Normal `
         -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
-    exit
+    [System.Environment]::Exit(0)
 }}
 
 $BackendUrl  = '{backend_url}'
@@ -272,7 +272,7 @@ $Config = @{{
     setup_code               = $SetupCode
     agent_token              = ''
 }} | ConvertTo-Json
-Set-Content -Path "$InstallDir\\agent_config.json" -Value $Config -Encoding UTF8
+[System.IO.File]::WriteAllText("$InstallDir\\agent_config.json", $Config)
 Write-Ok "agent_config.json written (agent will activate on first run)."
 
 # -- 6. Install Python packages -----------------------------------------------
