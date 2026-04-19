@@ -660,6 +660,7 @@ def _classify(url: str, context: str, detection_source: str) -> _ClassifyResult:
         resp = requests.post(
             f"{config_manager.backend_url}/agent/classify",
             json=payload,
+            headers={"Authorization": f"Bearer {config_manager.agent_token}"},
             timeout=8,
         )
         resp.raise_for_status()
@@ -749,6 +750,7 @@ def _sender_loop() -> None:
             resp = requests.post(
                 f"{config_manager.backend_url}/agent/hop/{CHILD_ID}",
                 json=event,
+                headers={"Authorization": f"Bearer {config_manager.agent_token}"},
                 timeout=5,
             )
             resp.raise_for_status()
