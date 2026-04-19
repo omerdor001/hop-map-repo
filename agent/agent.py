@@ -32,7 +32,7 @@ Detection pipeline
              preventing false positives at the cost of missed detections during
              network outages.
 
-  Layer 5 — When the server (or fallback) flags a hop attempt the lure is
+  Layer 5 — When the server flags a hop attempt the lure is
              parked in a per-URL pending store.  On the next app-switch away
              from the game the store is drained and each lure is confirmed with
              one of three click-confidence tiers:
@@ -42,9 +42,9 @@ Detection pipeline
 
 Required packages (pip install):
     pywin32  psutil  requests  python-dotenv  mss  pytesseract  Pillow
-    ollama   pyperclip
+    pyperclip
 
-Tesseract OCR engine (used by the local Ollama fallback only):
+Tesseract OCR engine (for game-window URL detection):
     https://github.com/UB-Mannheim/tesseract/wiki
 
 Run with:
@@ -174,7 +174,7 @@ def _use_builtin_platform_defaults() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tesseract auto-detection  (used only by the local Ollama fallback path)
+# Tesseract auto-detection
 # ---------------------------------------------------------------------------
 
 _TESSERACT_DEFAULT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -197,7 +197,7 @@ _configure_tesseract()
 # Logging
 # ---------------------------------------------------------------------------
 # Named logger with its own handler so that third-party libraries (httpx,
-# urllib3, ollama) adding handlers to the root logger cannot produce duplicate
+# urllib3) adding handlers to the root logger cannot produce duplicate
 # lines in our output.
 
 log = logging.getLogger("hopmap-agent")
@@ -222,6 +222,65 @@ CHILD_ID: str = ""  # assigned by the server on startup
 # File where the server-assigned child ID is persisted so the same record is
 # reused across agent restarts rather than creating a new orphaned profile.
 _CHILD_ID_FILE = pathlib.Path(__file__).parent / ".child_id"
+_CONFIG_FILE = pathlib.Path(__file__).parent / "agent_config.json"
+
+
+def _activate() -> None:
+    """Exchange a one-time setup code for the long-lived agent token.
+
+    Runs on startup before ``_register_child()``.  Skipped when the agent
+    already has a token (normal restarts) or has no setup code (manual
+    installs that set agent_token directly).
+
+    On success the config file is rewritten with the real token and the setup
+    code is cleared, then the in-memory config is reloaded so subsequent calls
+    in this process use the new token.
+
+    A 400 from the server means the code is invalid or expired; the agent
+    exits immediately rather than running without a valid identity.
+    """
+    if not config_manager.setup_code or config_manager.agent_token:
+        return
+
+    log.info("Setup code found — activating agent with server...")
+    try:
+        resp = requests.post(
+            f"{config_manager.backend_url}/agent/activate",
+            json={"setupCode": config_manager.setup_code},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        agent_token: str = resp.json()["agentToken"]
+    except requests.exceptions.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else 0
+        log.error(
+            "Agent activation failed (%d). "
+            "The setup code may be expired or already used. "
+            "Download a fresh installer from the parent dashboard.",
+            status,
+        )
+        sys.exit(1)
+    except requests.exceptions.RequestException as exc:
+        log.error("Cannot reach server to activate agent: %s", exc)
+        sys.exit(1)
+
+    # Persist: write real token, clear setup_code.
+    try:
+        config_data: dict = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
+        config_data["agent_token"] = agent_token
+        config_data["setup_code"] = ""
+        _CONFIG_FILE.write_text(
+            json.dumps(config_data, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        log.error("Could not write updated config after activation: %s", exc)
+        sys.exit(1)
+
+    # Update the in-memory config so the rest of this process sees the new token.
+    config_manager.agent_token = agent_token  # type: ignore[assignment]
+    config_manager.setup_code = ""            # type: ignore[assignment]
+    log.info("Agent activated successfully.")
 
 
 def _register_child() -> str:
@@ -1276,6 +1335,7 @@ def run() -> None:
 
     # Register with the server; use the ID it returns (may be server-generated).
     global CHILD_ID
+    _activate()
     CHILD_ID = _register_child()
 
     log.info(

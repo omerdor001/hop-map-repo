@@ -1,7 +1,7 @@
 {
   "backend_url": "http://localhost:8000",
-  "ollama_model": "qwen2.5:7b",
   "scan_interval_seconds": 5.0,
   "context_lines": 10,
-  "agent_token": "e383bb992872b82652ee3aaab32f86048084f49cd5bc2098a047dd621a8f57c0"
+  "agent_token": "",
+  "setup_code": ""
 }

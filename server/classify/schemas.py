@@ -8,6 +8,14 @@ class AgentMeResponse(BaseModel):
     childName: str
 
 
+class ActivateAgentRequest(BaseModel):
+    setup_code: str = Field(..., alias="setupCode", min_length=1)
+    model_config = {"populate_by_name": True}
+
+
+class ActivateAgentResponse(BaseModel):
+    agent_token: str = Field(..., alias="agentToken")
+
 class ClassifyRequest(BaseModel):
     child_id: str = Field(..., alias="childId")
     url: str = Field(..., max_length=2048)
