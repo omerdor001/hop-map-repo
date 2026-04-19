@@ -1,13 +1,32 @@
+import io
 import json
 import logging
-from datetime import datetime, timezone
+import pathlib
+import secrets
+import zipfile
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 
-from auth.dependencies import get_agent_child
-from children.repository import get_child_by_id
+from auth.dependencies import get_agent_child, get_current_user
+from auth.security import hash_token
+from agent_installer.generator import build_installer, build_uninstaller, build_readme, _AGENT_FILES, _SETUP_CODE_TTL_HOURS as _INSTALLER_TTL_HOURS
+from children.repository import (
+    get_child_by_id,
+    get_child_by_setup_code_hash,
+    consume_setup_code,
+    upsert_setup_code,
+)
 from classify import service as classify_service
-from classify.schemas import AgentMeResponse, ClassifyRequest, ClassifyResponse, HopEventRequest
+from classify.schemas import (
+    ActivateAgentRequest,
+    ActivateAgentResponse,
+    AgentMeResponse,
+    ClassifyRequest,
+    ClassifyResponse,
+    HopEventRequest,
+)
 from core.validators import validate_child_id
 from events import repository as event_repo
 from events import service as event_service
@@ -15,6 +34,9 @@ from notifications import repository as notif_repo
 from words.service import check_blocked_words
 
 log = logging.getLogger(__name__)
+
+# Root of the agent source directory, two levels up from this file (server/).
+_AGENT_DIR = pathlib.Path(__file__).parent.parent.parent / "agent"
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -26,6 +48,106 @@ async def agent_me(agent_child: dict = Depends(get_agent_child)) -> AgentMeRespo
         childId=agent_child["childId"],
         childName=agent_child.get("childName", ""),
     )
+
+
+@router.get("/files/{filename}")
+def agent_file(filename: str) -> Response:
+    """Serve a whitelisted agent source file for the installer to download.
+
+    Only files explicitly listed in ``_AGENT_FILES`` are served — any other
+    name returns 404, blocking path-traversal attempts entirely.
+    """
+    if filename not in _AGENT_FILES:
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    file_path = _AGENT_DIR / filename
+    if not file_path.exists():
+        log.error("Agent file missing from disk: %s", file_path)
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    content = file_path.read_bytes()
+    return Response(
+        content=content,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/installer")
+def agent_installer(
+    child_id: str = Query(..., alias="childId", description="ID of the child to install the agent for"),
+    backend_url: str = Query(..., alias="backendUrl", description="HopMap server base URL"),
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    """Generate a per-child PowerShell installer with an embedded one-time setup code.
+
+    The setup code is short-lived (1 h) and single-use — the agent exchanges it
+    for its long-lived credential on first run via POST /agent/activate.  This
+    means the .ps1 file itself contains no permanently sensitive material.
+
+    Requires parent JWT; verifies the child belongs to the requesting parent.
+    """
+    child = get_child_by_id(child_id, current_user["id"])
+    if child is None:
+        raise HTTPException(status_code=404, detail="Child not found.")
+
+    setup_code = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=_INSTALLER_TTL_HOURS)
+    upsert_setup_code(child_id, hash_token(setup_code), expires_at)
+
+    child_name = child.get("childName", child_id)
+    safe_filename = "".join(
+        c for c in child_name if c.isalnum() or c in (" ", "_", "-")
+    ).strip().replace(" ", "_") or "child"
+
+    installer  = build_installer(backend_url=backend_url.rstrip("/"), setup_code=setup_code, child_name=child_name)
+    uninstaller = build_uninstaller(child_name=child_name)
+    readme      = build_readme(child_name=child_name, ttl_hours=_INSTALLER_TTL_HOURS)
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("README.txt",             readme)
+        zf.writestr("hopmap_install.ps1",    installer)
+        zf.writestr("hopmap_uninstall.ps1",  uninstaller)
+    buf.seek(0)
+
+    return Response(
+        content=buf.read(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="hopmap_{safe_filename}.zip"',
+        },
+    )
+
+
+@router.post("/activate", response_model=ActivateAgentResponse)
+def agent_activate(body: ActivateAgentRequest) -> ActivateAgentResponse:
+    """Exchange a one-time setup code for a long-lived agent token.
+
+    Called by the agent on first run.  The setup code is burned immediately so
+    re-use returns the same 400 as an expired or unknown code — no oracle leak.
+    """
+    code_hash = hash_token(body.setup_code)
+    child = get_child_by_setup_code_hash(code_hash)
+
+    if child is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired setup code.")
+
+    expires_at_raw = child.get("setupCodeExpiresAt", "")
+    try:
+        expires_at = datetime.fromisoformat(expires_at_raw)
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid or expired setup code.")
+
+    if datetime.now(timezone.utc) >= expires_at:
+        raise HTTPException(status_code=400, detail="Invalid or expired setup code.")
+
+    new_token = secrets.token_hex(32)
+    consume_setup_code(child["childId"], hash_token(new_token), new_token[:8])
+
+    return ActivateAgentResponse(agentToken=new_token)
 
 
 @router.post("/classify", response_model=ClassifyResponse)

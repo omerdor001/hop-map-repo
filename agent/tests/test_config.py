@@ -35,7 +35,6 @@ def _load_config(json_overrides: dict | None = None, env_overrides: dict | None 
     # Write a temporary config JSON.
     defaults = {
         "backend_url": "http://localhost:8000",
-        "ollama_model": "qwen2.5:7b",
         "scan_interval_seconds": 5.0,
         "context_lines": 10,
     }
@@ -70,10 +69,6 @@ class TestAgentConfigDefaults:
     def test_default_backend_url(self, tmp_path):
         cfg = _load_config(tmp_path=tmp_path)
         assert cfg.backend_url == "http://localhost:8000"
-
-    def test_default_ollama_model(self, tmp_path):
-        cfg = _load_config(tmp_path=tmp_path)
-        assert cfg.ollama_model == "qwen2.5:7b"
 
     def test_default_scan_interval(self, tmp_path):
         cfg = _load_config(tmp_path=tmp_path)

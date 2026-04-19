@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react"
+import { useState } from "react"
 import Modal from "./Modal"
 import { useAuth } from "../context/AuthContext"
 
@@ -161,41 +161,35 @@ function StepForm({ onSuccess, onCancel }) {
   )
 }
 
-// ─── Step 2: Token reveal ─────────────────────────────────────────────────────
+// ─── Step 2: Installer download ──────────────────────────────────────────────
 
-function StepToken({ result, onDone, confirmClose, onConfirmDiscard, onCancelDiscard }) {
-  const [copied, setCopied] = useState(false)
-  const copyTimeoutRef = useRef(null)
+function StepInstaller({ result, onDone }) {
+  const { authFetch } = useAuth()
+  const [downloading, setDownloading] = useState(false)
 
-  // Clear any pending timeout on unmount to avoid setState on unmounted component
-  useEffect(() => () => clearTimeout(copyTimeoutRef.current), [])
+  const { childName, childId } = result
 
-  const { agentToken, childName } = result
-
-  function copyToken() {
-    navigator.clipboard.writeText(agentToken).then(() => {
-      setCopied(true)
-      clearTimeout(copyTimeoutRef.current)
-      copyTimeoutRef.current = setTimeout(() => setCopied(false), 2500)
-    })
-  }
-
-  function downloadConfig() {
-    // Produce a ready-to-use agent_config.json — token is the only credential needed
-    const config = {
-      backend_url: window.location.origin,
-      ollama_model: "qwen2.5:7b",
-      scan_interval_seconds: 5.0,
-      context_lines: 10,
-      agent_token: agentToken,
+  async function downloadInstaller() {
+    setDownloading(true)
+    try {
+      const params = new URLSearchParams({
+        childId:    childId,
+        backendUrl: window.location.origin,
+      })
+      const res = await authFetch(`/agent/installer?${params}`)
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement("a")
+      a.href     = url
+      a.download = `hopmap_${childName.replace(/\s+/g, "_").toLowerCase()}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Installer download failed:", err)
+    } finally {
+      setDownloading(false)
     }
-    const blob = new Blob([JSON.stringify(config, null, 2)], { type: "application/json" })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement("a")
-    a.href     = url
-    a.download = `agent_config_${childName.replace(/\s+/g, "_").toLowerCase()}.json`
-    a.click()
-    URL.revokeObjectURL(url)
   }
 
   return (
@@ -212,52 +206,8 @@ function StepToken({ result, onDone, confirmClose, onConfirmDiscard, onCancelDis
           {childName} added
         </h2>
         <p style={{ margin: "8px 0 0", color: MUTED, fontSize: 13, lineHeight: 1.5 }}>
-          Copy the agent token below and install it on {childName}&apos;s PC.
+          Download the installer and run it on {childName}&apos;s PC to complete setup.
         </p>
-      </div>
-
-      {/* Warning banner */}
-      <div style={{
-        display: "flex", alignItems: "flex-start", gap: 10,
-        background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.3)",
-        borderRadius: 8, padding: "10px 14px", marginBottom: 20,
-      }}>
-        <span style={{ fontSize: 15, flexShrink: 0, marginTop: 1 }}>⚠️</span>
-        <span style={{ fontSize: 13, color: "#fbbf24", lineHeight: 1.5 }}>
-          This token will <strong>not</strong> be shown again. Copy it now or download the config file.
-        </span>
-      </div>
-
-      {/* Token box */}
-      <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle}>Agent token</label>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            readOnly
-            value={agentToken}
-            style={{
-              ...inputStyle,
-              fontFamily: "'IBM Plex Mono', 'Courier New', monospace",
-              fontSize: 12,
-              color: "#a5b4fc",
-              flex: 1,
-              cursor: "text",
-            }}
-            onFocus={e => e.target.select()}
-          />
-          <button
-            onClick={copyToken}
-            style={{
-              ...btnPrimary,
-              padding: "10px 16px",
-              flexShrink: 0,
-              background: copied ? "#16a34a" : INDIGO,
-              transition: "background 0.2s",
-            }}
-          >
-            {copied ? "✓ Copied" : "Copy"}
-          </button>
-        </div>
       </div>
 
       {/* Install instructions */}
@@ -266,9 +216,9 @@ function StepToken({ result, onDone, confirmClose, onConfirmDiscard, onCancelDis
           SETUP INSTRUCTIONS
         </div>
         {[
-          { n: 1, text: "Download the config file below or copy the token above." },
-          { n: 2, text: "On the child's PC, place agent_config.json next to agent.py." },
-          { n: 3, text: "Run: python agent.py — the agent will connect automatically." },
+          { n: 1, text: "Download the ZIP below and copy it to the child's PC (USB, shared folder, etc.)." },
+          { n: 2, text: 'Right-click "hopmap_install.ps1" and choose "Run with PowerShell". Click Yes when Windows asks for admin permission.' },
+          { n: 3, text: "The installer sets everything up and starts the agent immediately - no further steps needed." },
         ].map(({ n, text }) => (
           <div key={n} style={{ display: "flex", gap: 12, marginBottom: 8, alignItems: "flex-start" }}>
             <span style={{
@@ -282,31 +232,14 @@ function StepToken({ result, onDone, confirmClose, onConfirmDiscard, onCancelDis
         ))}
       </div>
 
-      {/* Inline discard confirmation — replaces window.confirm() */}
-      {confirmClose && (
-        <div style={{
-          background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.35)",
-          borderRadius: 8, padding: "12px 14px", marginBottom: 16,
-          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-        }}>
-          <span style={{ fontSize: 13, color: "#fca5a5" }}>
-            The token won&apos;t be shown again. Close anyway?
-          </span>
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-            <button onClick={onCancelDiscard} style={{ ...btnGhost, padding: "6px 12px", fontSize: 12 }}>
-              Stay
-            </button>
-            <button onClick={onConfirmDiscard} style={{ ...btnPrimary, background: "#ef4444", padding: "6px 12px", fontSize: 12 }}>
-              Close
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Actions */}
       <div style={{ display: "flex", gap: 10 }}>
-        <button onClick={downloadConfig} style={{ ...btnGhost, flex: 1 }}>
-          ↓ Download agent_config.json
+        <button
+          onClick={downloadInstaller}
+          disabled={downloading}
+          style={downloading ? { ...btnGhost, flex: 1, opacity: 0.5, cursor: "not-allowed" } : { ...btnGhost, flex: 1 }}
+        >
+          {downloading ? "Preparing…" : "↓ Download Installer (.zip)"}
         </button>
         <button onClick={onDone} style={{ ...btnPrimary, flex: 1 }}>
           Done
@@ -327,48 +260,23 @@ function StepToken({ result, onDone, confirmClose, onConfirmDiscard, onCancelDis
  *   onCreated {function}  — called with the new child object after registration
  */
 export default function AddChildModal({ open, onClose, onCreated }) {
-  const [result, setResult]           = useState(null)  // null = step 1, object = step 2
-  const [confirmClose, setConfirmClose] = useState(false)
+  const [result, setResult] = useState(null)  // null = step 1, object = step 2
 
   function handleSuccess(data) {
     setResult(data)
     onCreated(data)
   }
 
-  // When on the token step, show an inline confirmation banner instead of
-  // a blocking window.confirm() dialog.
-  const handleClose = useCallback(() => {
-    if (result) {
-      setConfirmClose(true)
-    } else {
-      setResult(null)
-      onClose()
-    }
-  }, [result, onClose])
-
   function handleDone() {
     setResult(null)
-    setConfirmClose(false)
-    onClose()
-  }
-
-  function handleConfirmDiscard() {
-    setResult(null)
-    setConfirmClose(false)
     onClose()
   }
 
   return (
-    <Modal open={open} onClose={handleClose}>
+    <Modal open={open} onClose={handleDone}>
       {result
-        ? <StepToken
-            result={result}
-            onDone={handleDone}
-            confirmClose={confirmClose}
-            onConfirmDiscard={handleConfirmDiscard}
-            onCancelDiscard={() => setConfirmClose(false)}
-          />
-        : <StepForm onSuccess={handleSuccess} onCancel={handleClose} />
+        ? <StepInstaller result={result} onDone={handleDone} />
+        : <StepForm onSuccess={handleSuccess} onCancel={handleDone} />
       }
     </Modal>
   )

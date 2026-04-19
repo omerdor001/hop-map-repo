@@ -1,10 +1,11 @@
-"""Unit tests for _fetch_platform_db() and _register_child().
+"""Unit tests for _fetch_platform_db(), _register_child(), and _activate().
 
 requests is patched to avoid real HTTP calls.  File I/O for the child-ID
 persistence uses pytest's tmp_path fixture.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -208,5 +209,103 @@ class TestRegisterChild:
              patch("requests.get", get_mock):
             with pytest.raises(SystemExit) as exc_info:
                 _agent._register_child()
+
+        assert exc_info.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# _activate
+# ---------------------------------------------------------------------------
+
+class TestActivateAgent:
+    """Verify the one-time setup-code activation flow."""
+
+    def _make_config(self, tmp_path: Path, *, setup_code: str = "", agent_token: str = "") -> Path:
+        """Write a minimal agent_config.json and return its path."""
+        config_file = tmp_path / "agent_config.json"
+        config_file.write_text(
+            json.dumps({
+                "backend_url": "http://localhost:8000",
+                "agent_token": agent_token,
+                "setup_code": setup_code,
+            }),
+            encoding="utf-8",
+        )
+        return config_file
+
+    def test_skipped_when_token_already_set(self, tmp_path):
+        """_activate() is a no-op when the agent already has a token."""
+        config_file = self._make_config(tmp_path, setup_code="some-code", agent_token="existing-token")
+
+        with patch.object(_agent.config_manager, "setup_code", "some-code"), \
+             patch.object(_agent.config_manager, "agent_token", "existing-token"), \
+             patch.object(_agent, "_CONFIG_FILE", config_file), \
+             patch("requests.post") as post_mock:
+            _agent._activate()
+
+        post_mock.assert_not_called()
+
+    def test_skipped_when_no_setup_code(self, tmp_path):
+        """_activate() is a no-op when there is no setup code (manual install)."""
+        config_file = self._make_config(tmp_path, setup_code="", agent_token="")
+
+        with patch.object(_agent.config_manager, "setup_code", ""), \
+             patch.object(_agent.config_manager, "agent_token", ""), \
+             patch.object(_agent, "_CONFIG_FILE", config_file), \
+             patch("requests.post") as post_mock:
+            _agent._activate()
+
+        post_mock.assert_not_called()
+
+    def test_success_writes_token_and_clears_setup_code(self, tmp_path):
+        """On 200, the real token is written to disk and the setup code is cleared."""
+        config_file = self._make_config(tmp_path, setup_code="one-time-code")
+        new_token = "a" * 64
+
+        post_mock = MagicMock(return_value=_ok_response({"agentToken": new_token}))
+
+        with patch.object(_agent.config_manager, "setup_code", "one-time-code"), \
+             patch.object(_agent.config_manager, "agent_token", ""), \
+             patch.object(_agent.config_manager, "backend_url", "http://localhost:8000"), \
+             patch.object(_agent, "_CONFIG_FILE", config_file), \
+             patch("requests.post", post_mock):
+            _agent._activate()
+
+        post_mock.assert_called_once()
+        call_kwargs = post_mock.call_args
+        assert call_kwargs[1]["json"] == {"setupCode": "one-time-code"}
+
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["agent_token"] == new_token
+        assert saved["setup_code"] == ""
+
+    def test_exits_on_400_invalid_code(self, tmp_path):
+        """A 400 from /agent/activate is fatal — code is invalid or expired."""
+        config_file = self._make_config(tmp_path, setup_code="expired-code")
+
+        post_mock = MagicMock(return_value=_http_error_response(400))
+
+        with patch.object(_agent.config_manager, "setup_code", "expired-code"), \
+             patch.object(_agent.config_manager, "agent_token", ""), \
+             patch.object(_agent.config_manager, "backend_url", "http://localhost:8000"), \
+             patch.object(_agent, "_CONFIG_FILE", config_file), \
+             patch("requests.post", post_mock):
+            with pytest.raises(SystemExit) as exc_info:
+                _agent._activate()
+
+        assert exc_info.value.code == 1
+
+    def test_exits_when_server_unreachable(self, tmp_path):
+        """If the server is down during activation the agent cannot continue."""
+        config_file = self._make_config(tmp_path, setup_code="some-code")
+
+        with patch.object(_agent.config_manager, "setup_code", "some-code"), \
+             patch.object(_agent.config_manager, "agent_token", ""), \
+             patch.object(_agent.config_manager, "backend_url", "http://localhost:8000"), \
+             patch.object(_agent, "_CONFIG_FILE", config_file), \
+             patch("requests.post",
+                   side_effect=_real_requests.exceptions.ConnectionError("refused")):
+            with pytest.raises(SystemExit) as exc_info:
+                _agent._activate()
 
         assert exc_info.value.code == 1
