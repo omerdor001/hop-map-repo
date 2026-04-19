@@ -1,8 +1,8 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class WordRequest(BaseModel):
-    word: str
+    word: str = Field(..., max_length=100)
 
     @field_validator("word", mode="after")
     @classmethod

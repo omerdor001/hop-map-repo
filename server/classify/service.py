@@ -1,13 +1,23 @@
 import asyncio
-import json
 import logging
 import time
 
+from classify.circuit_breaker import LLMCircuitBreaker
+from classify.exceptions import LLMCircuitOpenError, LLMTimeoutError, LLMUnavailableError
 from config import config_manager
 from llm import LLMProvider
 from words.service import check_blocked_words
 
 log = logging.getLogger(__name__)
+
+# Transient errors worth retrying — availability and timeout issues only.
+# LLMInferenceError and LLMResponseParseError are deterministic; retrying
+# them would just reproduce the same failure.
+_RETRYABLE_ERRORS = (LLMUnavailableError, LLMTimeoutError)
+_MAX_RETRIES      = 2
+_RETRY_BASE_DELAY = 0.5  # seconds; actual delays: 0.5 s, 1.0 s
+
+_circuit_breaker = LLMCircuitBreaker(failure_threshold=5, recovery_timeout=60.0)
 
 _CLASSIFY_SYSTEM_PROMPT = """\
 You are a child-safety monitor reviewing in-game chat messages for predatory behavior, hate speech, and inappropriate content.
@@ -45,6 +55,10 @@ def set_llm(provider: LLMProvider) -> None:
     _llm = provider
 
 
+def get_circuit_breaker_state() -> str:
+    return _circuit_breaker.state
+
+
 async def check_rate_limit(child_id: str) -> bool:
     now = time.monotonic()
     async with _classify_rate_lock:
@@ -58,7 +72,32 @@ async def check_rate_limit(child_id: str) -> bool:
 
 
 async def run_classify(context: str) -> dict:
-    """Run LLM classification in a thread (non-blocking)."""
-    return await asyncio.to_thread(_llm.classify, context, _CLASSIFY_SYSTEM_PROMPT)
+    """Classify *context* with retry and circuit-breaker for transient LLM failures.
+
+    Retries up to _MAX_RETRIES times with exponential backoff on
+    LLMUnavailableError and LLMTimeoutError.  If the circuit breaker is OPEN,
+    the call fails immediately without sleeping — callers receive
+    LLMCircuitOpenError (a subclass of LLMUnavailableError).
+    """
+    last_exc: Exception | None = None
+
+    for attempt in range(_MAX_RETRIES + 1):
+        if attempt:
+            delay = _RETRY_BASE_DELAY * (2 ** (attempt - 1))  # 0.5 s, 1.0 s
+            log.warning("LLM classify retry %d/%d  delay=%.1fs", attempt, _MAX_RETRIES, delay)
+            await asyncio.sleep(delay)
+
+        try:
+            return await _circuit_breaker.call(
+                lambda: asyncio.to_thread(_llm.classify, context, _CLASSIFY_SYSTEM_PROMPT)
+            )
+        except LLMCircuitOpenError:
+            raise  # Circuit is open — sleeping and retrying won't help
+        except _RETRYABLE_ERRORS as exc:
+            last_exc = exc
+        # LLMInferenceError, LLMResponseParseError — not caught here, propagate immediately
+
+    assert last_exc is not None  # loop ran at least once; last_exc set by _RETRYABLE_ERRORS catch
+    raise last_exc
 
 

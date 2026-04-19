@@ -33,9 +33,9 @@ class TestPlatformsEndpoint:
         data = client.get("/api/platforms").json()
         assert isinstance(data["transit"], list)
 
-    def test_health_endpoint_returns_200(self, app_client):
-        """Smoke-test /health while we have a client."""
+    def test_liveness_endpoint_returns_200(self, app_client):
+        """Smoke-test /health/live while we have a client."""
         client, _ = app_client
-        resp = client.get("/health")
+        resp = client.get("/health/live")
         assert resp.status_code == 200
-        assert "status" in resp.json()
+        assert resp.json()["status"] == "alive"

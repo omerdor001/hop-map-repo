@@ -30,8 +30,10 @@ class LLMProvider(ABC):
                 reason     (str)  — short human-readable phrase
 
         Raises:
-            json.JSONDecodeError: if the model response is not valid JSON.
-            Exception:           for any provider-level failure (network, auth, etc.).
+            LLMResponseParseError: model output could not be parsed into a valid dict.
+            LLMUnavailableError:   provider daemon unreachable or model not pulled.
+            LLMTimeoutError:       inference request exceeded the timeout threshold.
+            LLMInferenceError:     provider returned an error response (4xx/5xx).
         """
 
     # ------------------------------------------------------------------
@@ -44,8 +46,8 @@ class LLMProvider(ABC):
 
         Strips markdown code fences that some models emit despite explicit
         instructions not to, then validates the three required fields.
-        Raises ``json.JSONDecodeError`` on malformed output so callers can
-        catch it and return a safe fallback.
+        Raises ``json.JSONDecodeError`` on malformed output; subclasses are
+        expected to wrap it in ``LLMResponseParseError`` before propagating.
         """
         raw = re.sub(
             r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE
