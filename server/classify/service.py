@@ -3,7 +3,7 @@ import logging
 import time
 
 from classify.circuit_breaker import LLMCircuitBreaker
-from classify.exceptions import LLMCircuitOpenError, LLMTimeoutError, LLMUnavailableError
+from classify.exceptions import ClassifyError, LLMCircuitOpenError, LLMTimeoutError, LLMUnavailableError
 from config import config_manager
 from llm import LLMProvider
 from words.service import check_blocked_words
@@ -79,7 +79,7 @@ async def run_classify(context: str) -> dict:
     the call fails immediately without sleeping — callers receive
     LLMCircuitOpenError (a subclass of LLMUnavailableError).
     """
-    last_exc: Exception | None = None
+    last_exc: ClassifyError = LLMUnavailableError("all retries exhausted")
 
     for attempt in range(_MAX_RETRIES + 1):
         if attempt:
@@ -97,7 +97,6 @@ async def run_classify(context: str) -> dict:
             last_exc = exc
         # LLMInferenceError, LLMResponseParseError — not caught here, propagate immediately
 
-    assert last_exc is not None  # loop ran at least once; last_exc set by _RETRYABLE_ERRORS catch
     raise last_exc
 
 

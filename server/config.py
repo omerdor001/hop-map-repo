@@ -102,6 +102,12 @@ class ServerConfig(BaseSettings):
         30, description="Max classify calls per child per minute", gt=0
     )
 
+    # 2 000 = one full Discord message; anything larger dilutes LLM classification accuracy.
+    # Override: HOPMAP_SERVER__CLASSIFY_CONTEXT_MAX_CHARS
+    classify_context_max_chars: int = Field(
+        2000, description="Max characters allowed in the classify context field", gt=0
+    )
+
     # Expose demo-seed endpoints (development / competition demo only).
     # Set HOPMAP_SERVER__DEMO_MODE=true in .env to enable.
     demo_mode: bool = Field(False, description="Expose demo seeding endpoints")
