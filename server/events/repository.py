@@ -9,7 +9,7 @@ def _col_events():
 
 
 def insert_event(doc: dict) -> str:
-    result = _col_events().insert_one({**doc})
+    result = _col_events().insert_one({**doc})  # copy prevents PyMongo from mutating caller's dict with _id
     return str(result.inserted_id)
 
 
