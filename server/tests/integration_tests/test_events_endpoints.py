@@ -78,7 +78,17 @@ class TestGetEvents:
         for _ in range(5):
             _insert_hop(client)
         resp = client.get(f"/api/events/{CHILD_ID}?limit=2")
-        assert resp.json()["count"] <= 2
+        assert resp.json()["count"] == 2
+
+    def test_limit_zero_returns_422(self, app_client):
+        client, _ = app_client
+        resp = client.get(f"/api/events/{CHILD_ID}?limit=0")
+        assert resp.status_code == 422
+
+    def test_limit_above_max_returns_422(self, app_client):
+        client, _ = app_client
+        resp = client.get(f"/api/events/{CHILD_ID}?limit=501")
+        assert resp.status_code == 422
 
 
 class TestDeleteEvents:

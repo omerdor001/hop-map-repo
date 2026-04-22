@@ -20,6 +20,10 @@ def get_blocked_words() -> set[str]:
     return {doc["word"] for doc in _col_words().find({}, {"_id": 0, "word": 1})}
 
 
+def has_words() -> bool:
+    return _col_words().count_documents({}, limit=1) > 0
+
+
 def add_word(word: str) -> bool:
     try:
         _col_words().insert_one({"word": word, "addedAt": datetime.now(timezone.utc).isoformat()})
