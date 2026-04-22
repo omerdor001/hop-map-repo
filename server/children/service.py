@@ -23,6 +23,8 @@ def add_child(child_id: str | None, child_name: str, parent_id: str, max_childre
 
 
 def update_child_name(child_id: str, child_name: str, parent_id: str) -> dict:
-    rename_child(child_id, child_name)
-    log.info("Child renamed  id=%r  name=%r", child_id, child_name)
+    updated = rename_child(child_id, parent_id, child_name)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Child not found.")
+    log.info("Child renamed  id=%r  name=%r  parent=%r", child_id, child_name, parent_id)
     return {"ok": True, "childId": child_id, "childName": child_name}

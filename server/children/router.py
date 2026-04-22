@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from auth.dependencies import get_current_user
-from children.repository import get_child_by_id, get_children
+from children.repository import get_children
 from children.schemas import RegisterChildRequest, RenameChildRequest
 from children import service as children_service
 from core.validators import validate_child_id
@@ -25,6 +25,4 @@ def register_child(body: RegisterChildRequest, current_user: dict = Depends(get_
 @router.patch("/{child_id}")
 def rename_child(child_id: str, body: RenameChildRequest, current_user: dict = Depends(get_current_user)) -> dict:
     validate_child_id(child_id)
-    if not get_child_by_id(child_id, current_user["id"]):
-        raise HTTPException(status_code=403, detail="Child not found or not yours.")
     return children_service.update_child_name(child_id, body.child_name, current_user["id"])
