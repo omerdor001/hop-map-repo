@@ -36,3 +36,21 @@ BLOCKED_PHRASE_HBW   = "this message has hack blocked word"
 # URL stubs used across tests
 SUSPICIOUS_URL       = "example.com/suspicious"
 PLAIN_URL            = "example.com/page"
+
+# ---------------------------------------------------------------------------
+# DB helpers
+# ---------------------------------------------------------------------------
+
+def register_test_child(child_id: str, parent_id: str = "test-parent-id") -> None:
+    """Insert a child document into the test MongoDB instance.
+
+    Parent-side endpoints verify ownership against the DB.  Tests that call
+    those endpoints must ensure the child exists and is owned by the mocked
+    parent before making the request.
+    """
+    from children.repository import _col_children
+    _col_children().update_one(
+        {"childId": child_id},
+        {"$setOnInsert": {"childId": child_id, "parentId": parent_id, "childName": child_id}},
+        upsert=True,
+    )

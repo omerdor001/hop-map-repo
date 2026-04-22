@@ -70,6 +70,33 @@ def mock_circuit_open():
         yield p
 
 
+@pytest.fixture()
+def mock_db_circuit_open():
+    """Replaces db_pool so circuit_breaker.state == 'open' (no ping should fire)."""
+    mock_pool = MagicMock()
+    mock_pool.circuit_breaker.state = "open"
+    with patch("health.checks.db_pool", mock_pool):
+        yield mock_pool
+
+
+@pytest.fixture()
+def mock_db_circuit_half_open():
+    """Replaces db_pool so circuit_breaker.state == 'half_open'."""
+    mock_pool = MagicMock()
+    mock_pool.circuit_breaker.state = "half_open"
+    with patch("health.checks.db_pool", mock_pool):
+        yield mock_pool
+
+
+@pytest.fixture()
+def mock_db_circuit_closed():
+    """Replaces db_pool so circuit_breaker.state == 'closed'."""
+    mock_pool = MagicMock()
+    mock_pool.circuit_breaker.state = "closed"
+    with patch("health.checks.db_pool", mock_pool):
+        yield mock_pool
+
+
 @pytest.fixture(scope="module")
 def health_client():
     """TestClient scoped to the FastAPI app; heavy session setup is handled
@@ -130,6 +157,43 @@ class TestCheckMongoDB:
     async def test_error_is_none_on_success(self, mock_db_ping_ok):
         result = await check_mongodb()
         assert result.error is None
+
+    # ------------------------------------------------------------------
+    # Circuit-breaker state propagation
+    # ------------------------------------------------------------------
+
+    async def test_circuit_open_returns_unhealthy_without_calling_ping(self, mock_db_circuit_open):
+        with patch("health.checks._ping_db_async", new_callable=AsyncMock) as mock_ping:
+            result = await check_mongodb()
+        assert result.status is HealthStatus.UNHEALTHY
+        assert result.circuit_breaker == "open"
+        mock_ping.assert_not_called()
+
+    async def test_circuit_open_error_mentions_suppressed(self, mock_db_circuit_open):
+        result = await check_mongodb()
+        assert result.error is not None
+        assert "OPEN" in result.error
+
+    async def test_circuit_open_latency_is_none(self, mock_db_circuit_open):
+        result = await check_mongodb()
+        assert result.latency_ms is None
+
+    async def test_circuit_breaker_closed_reflected_in_healthy_result(self, mock_db_circuit_closed):
+        with patch("health.checks._ping_db_async", new_callable=AsyncMock, return_value=True):
+            result = await check_mongodb()
+        assert result.status is HealthStatus.HEALTHY
+        assert result.circuit_breaker == "closed"
+
+    async def test_circuit_breaker_half_open_reflected_in_result(self, mock_db_circuit_half_open):
+        with patch("health.checks._ping_db_async", new_callable=AsyncMock, return_value=True):
+            result = await check_mongodb()
+        assert result.circuit_breaker == "half_open"
+
+    async def test_circuit_breaker_state_in_unhealthy_ping_result(self, mock_db_circuit_closed):
+        with patch("health.checks._ping_db_async", new_callable=AsyncMock, return_value=False):
+            result = await check_mongodb()
+        assert result.status is HealthStatus.UNHEALTHY
+        assert result.circuit_breaker == "closed"
 
 
 # =============================================================================

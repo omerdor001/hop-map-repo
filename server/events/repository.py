@@ -1,11 +1,11 @@
 from pymongo import DESCENDING
 
-from core.database import _pool
+from core.database import pool
 from config import config_manager
 
 
 def _col_events():
-    return _pool.get_collection(config_manager.db.events_collection)
+    return pool.get_collection(config_manager.db.events_collection)
 
 
 def insert_event(doc: dict) -> str:

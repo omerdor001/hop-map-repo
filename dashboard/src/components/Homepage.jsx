@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
+import { fetchEventSource } from "@microsoft/fetch-event-source"
+import config from "../config"
 import {
   AVATAR_GRADS,
   getInitials,
@@ -6,12 +8,15 @@ import {
   getEventDesc,
   getEventTitle,
   todayDefault,
+  Badge,
+  StatCard,
   Dot,
 } from "../utils/eventHelpers"
+import { colors, fonts, pageRoot, timelineContainer, timelineEmpty, liveBadge, dateInput } from "../utils/theme"
 import { useAuth } from "../context/AuthContext"
 
 export default function Homepage({ childList, activeId, setActiveId }) {
-  const { authFetch } = useAuth()
+  const { accessToken, authFetch } = useAuth()
   const [time, setTime]             = useState(new Date())
   const [allEvents, setAllEvents]   = useState([])
   const [sseConnected, setSseConnected] = useState(false)
@@ -23,49 +28,48 @@ export default function Homepage({ childList, activeId, setActiveId }) {
   }, [])
 
   useEffect(() => {
-    if (!activeId) return
+    if (!activeId || !accessToken) return
     setAllEvents([])
     setSseConnected(false)
-    const es = new EventSource(`/stream/${activeId}`)
-    es.onopen    = () => setSseConnected(true)
-    es.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data)
-        if (msg.type === "history") {
-          setAllEvents(msg.events || [])
-        } else if (msg.type === "event") {
-          const { type, ...event } = msg
-          // Only show confirmed hops in the timeline
-          if (event.alertReason === "confirmed_hop") {
-            setAllEvents(prev => [event, ...prev])
-          }
-        }
-      } catch {}
-    }
-    es.onerror = () => {
-      setSseConnected(false)
-      authFetch(`/api/events/${activeId}?limit=500`)
-        .then(r => r.ok ? r.json() : null)
-        .then(data => setAllEvents(data?.events || []))
-        .catch(() => {})
-    }
-    return () => es.close()
-  }, [activeId, authFetch])
 
-  const handleDateChange = (e) => {
-    let val = e.target.value.replace(/[^\d/]/g, "")
-    if (val.length === 2 && !val.includes("/")) val += "/"
-    if (val.length === 5 && val.split("/").length - 1 === 1) val += "/"
-    if (val.length > 10) return
-    setSelectedDate(val)
-  }
+    const controller = new AbortController()
+
+    fetchEventSource(`/stream/${activeId}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
+      onopen: async (res) => {
+        if (!res.ok) throw new Error(`SSE open failed: ${res.status}`)
+        setSseConnected(true)
+      },
+      onmessage: (ev) => {
+        try {
+          const msg = JSON.parse(ev.data)
+          if (msg.type === "history") {
+            setAllEvents(msg.events || [])
+          } else if (msg.type === "event") {
+            const { type, ...event } = msg
+            if (event.alertReason === "confirmed_hop") {
+              setAllEvents(prev => [event, ...prev])
+            }
+          }
+        } catch {}
+      },
+      onerror: () => {
+        setSseConnected(false)
+        authFetch(`/api/events/${activeId}?limit=${config.eventHistoryLimit}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => { if (data) setAllEvents(data.events || []) })
+          .catch(() => {})
+        throw new Error("SSE error")
+      },
+    }).catch(() => {})
+
+    return () => controller.abort()
+  }, [activeId, accessToken, authFetch])
 
   const filteredEvents = useMemo(() => {
-    if (!selectedDate || selectedDate.length < 10) return allEvents
-    const [dd, mm, yyyy] = selectedDate.split("/")
-    if (!dd || !mm || !yyyy) return allEvents
-    const prefix = `${yyyy}-${mm}-${dd}`
-    return allEvents.filter(e => e.timestamp && e.timestamp.startsWith(prefix))
+    if (!selectedDate) return allEvents
+    return allEvents.filter(e => e.timestamp && e.timestamp.startsWith(selectedDate))
   }, [allEvents, selectedDate])
 
   const activeChild = useMemo(() =>
@@ -76,11 +80,11 @@ export default function Homepage({ childList, activeId, setActiveId }) {
 
   const isLive = useMemo(() => {
     if (!allEvents.length || !sseConnected) return false
-    return (Date.now() - new Date(allEvents[0].timestamp).getTime()) < 60_000
+    return (Date.now() - new Date(allEvents[0].timestamp).getTime()) < config.liveThresholdMs
   }, [allEvents, sseConnected])
 
   const todayEvents = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayDefault()
     return allEvents.filter(e => e.timestamp && e.timestamp.startsWith(today))
   }, [allEvents])
 
@@ -121,22 +125,20 @@ export default function Homepage({ childList, activeId, setActiveId }) {
 
   if (!activeId || childList.length === 0) {
     return (
-      <div style={{ width:"100%", height:"100vh", background:"#0d0f14", color:"#4b5268",
-        display:"flex", alignItems:"center", justifyContent:"center",
-        fontFamily:"'IBM Plex Mono',monospace", fontSize:13 }}>
+      <div style={{ ...pageRoot, alignItems: "center", justifyContent: "center",
+        color: colors.muted, fontFamily: fonts.mono, fontSize: 13 }}>
         No children registered. Start the agent to begin monitoring.
       </div>
     )
   }
 
   return (
-    <div style={{ width:"100%", height:"100vh", background:"#0d0f14", color:"#e8eaf0",
-      fontFamily:"'IBM Plex Sans',sans-serif", display:"flex", flexDirection:"column", overflow:"hidden" }}>
-      <div style={{ flex:1, display:"flex", overflow:"hidden" }}>
-        <div style={{ flex:1, padding:"16px 24px", display:"flex", flexDirection:"column", gap:13, overflow:"hidden" }}>
+    <div style={pageRoot}>
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        <div style={{ flex: 1, padding: "16px 24px", display: "flex", flexDirection: "column", gap: 13, overflow: "hidden" }}>
 
           {/* Child switcher */}
-          <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0, animation:"in 0.4s ease" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, animation: "in 0.4s ease" }}>
             {childList.map((c, idx) => {
               const isActive  = c.childId === activeId
               const grad      = AVATAR_GRADS[idx % AVATAR_GRADS.length]
@@ -144,159 +146,128 @@ export default function Homepage({ childList, activeId, setActiveId }) {
               const childLive = c.childId === activeId ? isLive : false
               return (
                 <button key={c.childId} onClick={() => setActiveId(c.childId)} style={{
-                  display:"flex", alignItems:"center", gap:8,
-                  padding:"7px 14px", borderRadius:20, border:"1px solid",
-                  borderColor: isActive ? "#6366f1" : "#1e2130",
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "7px 14px", borderRadius: 20, border: "1px solid",
+                  borderColor: isActive ? colors.indigo : colors.border,
                   background: isActive ? "rgba(99,102,241,0.15)" : "transparent",
-                  cursor:"pointer", transition:"all 0.15s",
+                  cursor: "pointer", transition: "all 0.15s",
                 }}>
-                  <div style={{ width:24, height:24, borderRadius:"50%", background:grad,
-                    display:"flex", alignItems:"center", justifyContent:"center",
-                    fontSize:9, fontWeight:700, color:"#fff", flexShrink:0 }}>{initials}</div>
-                  <span style={{ fontSize:12, fontWeight: isActive ? 600 : 400,
-                    color: isActive ? "#818cf8" : "#9098b8" }}>{c.childName || c.childId}</span>
-                  <Dot color={childLive ? "#2ed573" : "#3a3f58"} pulse={childLive} />
+                  <div style={{ width: 24, height: 24, borderRadius: "50%", background: grad,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 9, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{initials}</div>
+                  <span style={{ fontSize: 12, fontWeight: isActive ? 600 : 400,
+                    color: isActive ? colors.indigoLight : colors.muted }}>{c.childName || c.childId}</span>
+                  <Dot color={childLive ? colors.success : colors.subtle} pulse={childLive} />
                 </button>
               )
             })}
           </div>
 
           {/* Greeting */}
-          <div style={{ animation:"in 0.4s ease" }}>
-            <div style={{ fontSize:10, color:"#4b5268", fontFamily:"'IBM Plex Mono',monospace",
-              letterSpacing:"0.1em", marginBottom:3 }}>{greet}</div>
-            <h1 style={{ fontSize:20, fontWeight:700, letterSpacing:"-0.02em" }}>
+          <div style={{ animation: "in 0.4s ease" }}>
+            <div style={{ fontSize: 10, color: colors.muted, fontFamily: fonts.mono,
+              letterSpacing: "0.1em", marginBottom: 3 }}>{greet}</div>
+            <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em" }}>
               Hello, you're looking at{" "}
-              <span style={{ color:"#818cf8" }}>{childName}</span>
+              <span style={{ color: colors.indigoLight }}>{childName}</span>
             </h1>
-            <p style={{ fontSize:11, color:"#4b5268", marginTop:2 }}>
+            <p style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>
               Today, {todayLabel}
               {status === "live"
-                ? <> · Session started {sessionStart} · <span style={{ color:"#2ed573" }}>● LIVE · {sessionDuration}</span></>
-                : <> · <span style={{ color:"#4b5268" }}>● Offline</span></>
+                ? <> · Session started {sessionStart} · <span style={{ color: colors.success }}>● LIVE · {sessionDuration}</span></>
+                : <> · <span style={{ color: colors.muted }}>● Offline</span></>
               }
             </p>
           </div>
 
           {/* Latest hop banner */}
           {latestHop ? (
-            <div style={{ background:"rgba(255,71,87,0.07)", border:"1px solid rgba(255,71,87,0.28)",
-              borderRadius:10, padding:"11px 15px", display:"flex", alignItems:"center", gap:12,
-              flexShrink:0, animation:"in 0.35s ease 0.05s both" }}>
-              <span style={{ fontSize:18, flexShrink:0 }}>🚨</span>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:9, color:"#ff4757", fontFamily:"'IBM Plex Mono',monospace",
-                  letterSpacing:"0.07em", marginBottom:1 }}>LATEST HOP · {latestHop.time}</div>
-                <div style={{ fontSize:13, fontWeight:600, color:"#e8eaf0",
-                  whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{latestHop.title}</div>
-                <div style={{ fontSize:11, color:"#6b7290",
-                  whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{latestHop.desc}</div>
+            <div style={{ background: "rgba(255,71,87,0.07)", border: "1px solid rgba(255,71,87,0.28)",
+              borderRadius: 10, padding: "11px 15px", display: "flex", alignItems: "center", gap: 12,
+              flexShrink: 0, animation: "in 0.35s ease 0.05s both" }}>
+              <span style={{ fontSize: 18, flexShrink: 0 }}>🚨</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 9, color: colors.danger, fontFamily: fonts.mono,
+                  letterSpacing: "0.07em", marginBottom: 1 }}>LATEST HOP · {latestHop.time}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: colors.text,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{latestHop.title}</div>
+                <div style={{ fontSize: 11, color: colors.muted,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{latestHop.desc}</div>
               </div>
             </div>
           ) : (
-            <div style={{ background:"rgba(46,213,115,0.06)", border:"1px solid rgba(46,213,115,0.2)",
-              borderRadius:10, padding:"11px 15px", display:"flex", alignItems:"center", gap:12,
-              flexShrink:0, animation:"in 0.35s ease 0.05s both" }}>
-              <span style={{ fontSize:18 }}>✅</span>
+            <div style={{ background: "rgba(46,213,115,0.06)", border: "1px solid rgba(46,213,115,0.2)",
+              borderRadius: 10, padding: "11px 15px", display: "flex", alignItems: "center", gap: 12,
+              flexShrink: 0, animation: "in 0.35s ease 0.05s both" }}>
+              <span style={{ fontSize: 18 }}>✅</span>
               <div>
-                <div style={{ fontSize:9, color:"#2ed573", fontFamily:"'IBM Plex Mono',monospace",
-                  letterSpacing:"0.07em", marginBottom:1 }}>ALL CLEAR</div>
-                <div style={{ fontSize:13, fontWeight:600, color:"#e8eaf0" }}>No hops detected for {childName}</div>
-                <div style={{ fontSize:11, color:"#4b5268" }}>All recent sessions within safe platform boundaries</div>
+                <div style={{ fontSize: 9, color: colors.success, fontFamily: fonts.mono,
+                  letterSpacing: "0.07em", marginBottom: 1 }}>ALL CLEAR</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: colors.text }}>No hops detected for {childName}</div>
+                <div style={{ fontSize: 11, color: colors.muted }}>All recent sessions within safe platform boundaries</div>
               </div>
             </div>
           )}
 
           {/* Stat cards */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:11,
-            flexShrink:0, animation:"in 0.35s ease 0.1s both" }}>
-            {[
-              { label:"HOPS DETECTED", val:allEvents.length,   color:"#ff4757", sub:"Confirmed hops" },
-              { label:"APPS TARGETED", val:platforms,          color:"#818cf8", sub:"Unique platforms" },
-              { label:"TODAY'S HOPS",  val:todayEvents.length, color:"#ffa502", sub:"Hops today" },
-            ].map(s => (
-              <div key={s.label} style={{ background:"#111318", border:"1px solid #1e2130",
-                borderTop:`3px solid ${s.color}`, borderRadius:10, padding:"12px 14px" }}>
-                <div style={{ fontSize:9, color:"#4b5268", letterSpacing:"0.1em",
-                  fontFamily:"'IBM Plex Mono',monospace", marginBottom:5 }}>{s.label}</div>
-                <div style={{ fontSize:30, fontWeight:700, color:s.color, lineHeight:1,
-                  fontFamily:"'IBM Plex Mono',monospace", marginBottom:3 }}>{s.val}</div>
-                <div style={{ fontSize:10, color:"#4b5268" }}>{s.sub}</div>
-              </div>
-            ))}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 11,
+            flexShrink: 0, animation: "in 0.35s ease 0.1s both" }}>
+            <StatCard label="HOPS DETECTED" val={allEvents.length}   color={colors.danger}      sub="Confirmed hops" />
+            <StatCard label="APPS TARGETED" val={platforms}          color={colors.indigoLight} sub="Unique platforms" />
+            <StatCard label="TODAY'S HOPS"  val={todayEvents.length} color={colors.warning}     sub="Hops today" />
           </div>
 
           {/* Timeline header */}
-          <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0, animation:"in 0.35s ease 0.15s both" }}>
-            <span style={{ fontSize:11, fontWeight:700, fontFamily:"'IBM Plex Mono',monospace", letterSpacing:"0.1em" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, animation: "in 0.35s ease 0.15s both" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, fontFamily: fonts.mono, letterSpacing: "0.1em" }}>
               HOP TIMELINE
             </span>
-            {isLive && (
-              <span style={{ fontSize:9, fontWeight:700, color:"#ff4757",
-                background:"rgba(255,71,87,0.13)", border:"1px solid rgba(255,71,87,0.28)",
-                borderRadius:4, padding:"2px 6px", fontFamily:"'IBM Plex Mono',monospace" }}>● LIVE</span>
-            )}
-            <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:8 }}>
-              <span style={{ fontSize:11, color:"#4b5268", fontFamily:"'IBM Plex Mono',monospace" }}>Date</span>
+            {isLive && <span style={liveBadge}>● LIVE</span>}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 11, color: colors.muted, fontFamily: fonts.mono }}>Date</span>
               <input
-                type="text"
+                type="date"
                 value={selectedDate}
-                onChange={handleDateChange}
-                placeholder="DD/MM/YYYY"
-                maxLength={10}
-                style={{
-                  background:"#111318", border:"1px solid #1e2130",
-                  borderRadius:7, padding:"5px 10px", color:"#e8eaf0",
-                  fontSize:11, fontFamily:"'IBM Plex Mono',monospace",
-                  outline:"none", width:100, letterSpacing:"0.05em",
-                }}
+                onChange={e => setSelectedDate(e.target.value)}
+                style={dateInput}
               />
             </div>
           </div>
 
           {/* Timeline events */}
-          <div style={{ flex:1, background:"#111318", border:"1px solid #1e2130",
-            borderRadius:10, overflowY:"auto", animation:"in 0.35s ease 0.2s both" }}>
+          <div style={{ ...timelineContainer, animation: "in 0.35s ease 0.2s both" }}>
             {filteredEvents.length === 0 ? (
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"center",
-                height:"100%", color:"#3a3f58", fontFamily:"'IBM Plex Mono',monospace", fontSize:12 }}>
-                No hops found for this date
-              </div>
+              <div style={timelineEmpty}>No hops found for this date</div>
             ) : filteredEvents.map((ev, i) => {
               const { icon, bg: iconBg } = getAppIcon(ev.to)
               const title  = getEventTitle(ev)
               const desc   = getEventDesc(ev, "Confirmed hop detected")
               const evTime = ev.timestamp
-                ? new Date(ev.timestamp).toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" })
+                ? new Date(ev.timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
                 : "—"
               return (
                 <div key={ev.receivedAt || `${ev.timestamp}-${i}`} className="ev-row" style={{
-                  display:"flex", alignItems:"center", gap:11, padding:"10px 15px",
-                  borderBottom: i < filteredEvents.length - 1 ? "1px solid #1a1d28" : "none",
-                  background:"rgba(255,71,87,0.04)", transition:"background 0.15s",
+                  display: "flex", alignItems: "center", gap: 11, padding: "10px 15px",
+                  borderBottom: i < filteredEvents.length - 1 ? `1px solid ${colors.rowDivider}` : "none",
+                  background: "rgba(255,71,87,0.04)", transition: "background 0.15s",
                 }}>
-                  <Dot color="#ff4757" pulse={i === 0 && isLive} />
-                  <span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:11,
-                    color:"#4b5268", minWidth:34, flexShrink:0 }}>{evTime}</span>
-                  <div style={{ width:24, height:24, borderRadius:"50%", background:avatarGrad,
-                    display:"flex", alignItems:"center", justifyContent:"center",
-                    fontSize:8, fontWeight:700, color:"#fff", flexShrink:0 }}>{childInitials}</div>
-                  <div style={{ width:28, height:28, borderRadius:7, background:iconBg,
-                    display:"flex", alignItems:"center", justifyContent:"center",
-                    fontSize:13, flexShrink:0 }}>{icon}</div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:2 }}>
-                      <span style={{ fontSize:12, fontWeight:600, color:"#e8eaf0",
-                        whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:360 }}>{title}</span>
-                      <span style={{
-                        fontSize:9, fontWeight:700, letterSpacing:"0.07em",
-                        color:"#ff4757", background:"rgba(255,71,87,0.13)",
-                        border:"1px solid rgba(255,71,87,0.33)", borderRadius:4, padding:"2px 6px",
-                        fontFamily:"'IBM Plex Mono',monospace", whiteSpace:"nowrap",
-                      }}>HIGH RISK</span>
+                  <Dot color={colors.danger} pulse={i === 0 && isLive} />
+                  <span style={{ fontFamily: fonts.mono, fontSize: 11,
+                    color: colors.muted, minWidth: 34, flexShrink: 0 }}>{evTime}</span>
+                  <div style={{ width: 24, height: 24, borderRadius: "50%", background: avatarGrad,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 8, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{childInitials}</div>
+                  <div style={{ width: 28, height: 28, borderRadius: 7, background: iconBg,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 13, flexShrink: 0 }}>{icon}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 2 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: colors.text,
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 360 }}>{title}</span>
+                      <Badge risk="HIGH" />
                     </div>
-                    <div style={{ fontSize:11, color:"#4b5268",
-                      whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:500 }}>{desc}</div>
+                    <div style={{ fontSize: 11, color: colors.muted,
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 500 }}>{desc}</div>
                   </div>
                 </div>
               )

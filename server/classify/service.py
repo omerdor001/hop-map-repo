@@ -3,7 +3,7 @@ import logging
 import time
 
 from classify.circuit_breaker import LLMCircuitBreaker
-from classify.exceptions import LLMCircuitOpenError, LLMTimeoutError, LLMUnavailableError
+from classify.exceptions import ClassifyError, LLMCircuitOpenError, LLMTimeoutError, LLMUnavailableError
 from config import config_manager
 from llm import LLMProvider
 from words.service import check_blocked_words
@@ -44,9 +44,14 @@ Schema:
 """
 
 # { child_id: [monotonic_timestamp, …] }
+# Timestamps are always appended in order; ts[-1] is always the most-recent call.
 _classify_call_times: dict[str, list[float]] = {}
 _classify_rate_lock = asyncio.Lock()
 
+# Seconds between background sweeps that evict entries for inactive children.
+_SWEEP_INTERVAL = 300
+
+_sweep_task: asyncio.Task | None = None
 _llm: LLMProvider | None = None
 
 
@@ -71,6 +76,49 @@ async def check_rate_limit(child_id: str) -> bool:
         return True
 
 
+async def _sweep_once() -> int:
+    """Evict child entries whose most-recent call is older than the rate-limit window.
+
+    Uses ts[-1] as the staleness signal — O(1) per entry because timestamps are
+    always appended in order.  Returns the number of evicted entries.
+    """
+    cutoff = time.monotonic() - 60.0
+    async with _classify_rate_lock:
+        stale = [
+            cid for cid, ts in _classify_call_times.items()
+            if not ts or ts[-1] < cutoff
+        ]
+        for key in stale:
+            del _classify_call_times[key]
+    if stale:
+        log.debug("Rate-limit sweep: evicted %d stale entries.", len(stale))
+    return len(stale)
+
+
+async def _sweep_loop() -> None:
+    while True:
+        try:
+            await asyncio.sleep(_SWEEP_INTERVAL)
+        except asyncio.CancelledError:
+            return
+        await _sweep_once()
+
+
+def is_sweep_task_alive() -> bool:
+    return _sweep_task is not None and not _sweep_task.done()
+
+
+async def start_sweep_task() -> None:
+    global _sweep_task
+    _sweep_task = asyncio.create_task(_sweep_loop())
+
+
+async def stop_sweep_task() -> None:
+    if _sweep_task is not None:
+        _sweep_task.cancel()
+        await asyncio.gather(_sweep_task, return_exceptions=True)
+
+
 async def run_classify(context: str) -> dict:
     """Classify *context* with retry and circuit-breaker for transient LLM failures.
 
@@ -79,7 +127,7 @@ async def run_classify(context: str) -> dict:
     the call fails immediately without sleeping — callers receive
     LLMCircuitOpenError (a subclass of LLMUnavailableError).
     """
-    last_exc: Exception | None = None
+    last_exc: ClassifyError = LLMUnavailableError("all retries exhausted")
 
     for attempt in range(_MAX_RETRIES + 1):
         if attempt:
@@ -97,7 +145,6 @@ async def run_classify(context: str) -> dict:
             last_exc = exc
         # LLMInferenceError, LLMResponseParseError — not caught here, propagate immediately
 
-    assert last_exc is not None  # loop ran at least once; last_exc set by _RETRYABLE_ERRORS catch
     raise last_exc
 
 

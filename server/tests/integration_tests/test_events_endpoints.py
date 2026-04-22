@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import pytest
 
+from test_helpers import register_test_child
+
 
 CHILD_ID = "inttest-events-child"
 
 
 def _insert_hop(client, child_id: str = CHILD_ID, **kwargs):
+    register_test_child(child_id)
     body = {
         "from": "roblox.exe",
         "to": "discord.exe",
@@ -25,6 +28,7 @@ class TestGetEvents:
 
     def test_empty_child_returns_zero_count(self, app_client):
         client, _ = app_client
+        register_test_child("nobody-here")
         resp = client.get("/api/events/nobody-here")
         assert resp.status_code == 200
         data = resp.json()
@@ -96,6 +100,7 @@ class TestDeleteEvents:
 
     def test_clear_on_empty_child_returns_zero(self, app_client):
         client, _ = app_client
+        register_test_child("no-events-ever")
         resp = client.delete("/api/events/no-events-ever")
         assert resp.json()["deleted"] == 0
 

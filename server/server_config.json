@@ -24,5 +24,6 @@
     "refresh_cookie_secure": false
   },
   "classify_max_rpm": 30,
+  "classify_context_max_chars": 2000,
   "demo_mode": false
 }
