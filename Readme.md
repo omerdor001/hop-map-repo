@@ -7,7 +7,7 @@
 ![MongoDB](https://img.shields.io/badge/MongoDB-7.0+-47A248)
 ![Ollama](https://img.shields.io/badge/Ollama-local--inference-black)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D4)
-![Tests](https://img.shields.io/badge/tests-567%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-592%20passing-brightgreen)
 ![Maintained](https://img.shields.io/badge/maintained-yes-brightgreen)
 
 A full-stack child safety platform that detects and alerts parents when children attempt to "hop" from moderated gaming environments to unmoderated external platforms in real time.
@@ -24,7 +24,7 @@ HopMap monitors a child's Windows gaming session and uses LLM-powered classifica
 - **Parent Dashboard** — React 19 frontend with live SSE event streaming, child profiles, alert history, one-click installer download, and whitelist/blacklist management
 - **MongoDB Database** — Persistent storage for hop events, children, auth sessions, notifications, and blocked words
 - **Health Checks** — `/health/live` and `/health/ready` endpoints reporting MongoDB, Ollama, and words-filter status
-- **Test Suite** — 567 passing tests across unit, integration, and E2E layers
+- **Test Suite** — 592 passing tests across unit, integration, and E2E layers
 
 ## 🚀 Quick Start
 
@@ -395,7 +395,7 @@ Config priority (highest first): environment variables → `.env` file → `serv
 
 ## 🧪 Testing
 
-567 tests passing across unit, integration, and E2E layers with 0 failures.
+592 tests passing across unit, integration, and E2E layers with 0 failures.
 
 ### Running Tests
 
@@ -421,29 +421,29 @@ agent/tests/                    85 tests
 ├── test_pure_utils.py          22 — URL regex, domain parsing, context extraction
 └── test_ttl_cache.py            9 — TTL cache ops, expiry, size bound, thread safety
 
-server/tests/                  482 tests
+server/tests/                  507 tests
 ├── e2e/
 │   └── test_full_hop_flow.py       11 — classify→hop→events→SSE full flow
 ├── integration_tests/
 │   ├── test_activate_endpoint.py    6 — setup code exchange, single-use, expiry
 │   ├── test_auth_rate_limit.py     11 — per-IP 429 enforcement, Retry-After, IP isolation
-│   ├── test_children_endpoints.py  10 — child CRUD, agent token
+│   ├── test_children_endpoints.py  11 — child CRUD, agent token
 │   ├── test_classify_endpoint.py   10 — word_db fast path, LLM path, 18+, Hebrew
-│   ├── test_events_endpoints.py    11 — event history, delete, count
+│   ├── test_events_endpoints.py    13 — event history, delete, count, limit validation
 │   ├── test_hop_endpoint.py         6 — hop recording, notification creation
 │   ├── test_platforms_endpoint.py   6 — platform map serving
 │   ├── test_sse_stream.py           4 — SSE connection, event delivery
-│   └── test_words_endpoints.py      9 — words CRUD, duplicate, normalise, reload
+│   └── test_words_endpoints.py     11 — words CRUD, duplicate, normalise, reload
 └── unit_tests/
-    ├── test_auth.py               56 — JWT, bcrypt, token rotation, password complexity
+    ├── test_auth.py               57 — JWT, bcrypt, token rotation, password complexity
     ├── test_circuit_breaker.py    54 — LLM circuit breaker open/closed/half-open states
     ├── test_db_circuit_breaker.py 55 — DB circuit breaker states, thread safety, proxy
-    ├── test_db_unit.py            67 — connection pool, ping, collection helpers
+    ├── test_db_unit.py            68 — connection pool, ping, collection helpers
     ├── test_events_service.py     27 — listener lifecycle, broadcast, snapshot safety
     ├── test_health_checks.py      51 — MongoDB/Ollama/words-filter health + circuit state
     ├── test_llm_base.py           16 — LLM provider abstraction, classify contract
     ├── test_platforms_loader.py   15 — Excel loader, fallback, synthetic fixtures
-    ├── test_rate_limiter.py        6 — per-child RPM enforcement
+    ├── test_rate_limiter.py       24 — per-child RPM enforcement, sweep lifecycle
     ├── test_startup.py            30 — JWT secret validation, dev/prod/staging behaviour
     └── test_words_filter.py       21 — Aho-Corasick: boundary, phrase, Unicode, 18+
 ```

@@ -1,4 +1,5 @@
 import asyncio
+import bisect
 import logging
 import time
 
@@ -66,13 +67,15 @@ def get_circuit_breaker_state() -> str:
 
 async def check_rate_limit(child_id: str) -> bool:
     now = time.monotonic()
+    cutoff = now - 60.0
     async with _classify_rate_lock:
-        recent = [t for t in _classify_call_times.get(child_id, []) if now - t < 60.0]
-        if len(recent) >= config_manager.classify_max_rpm:
-            _classify_call_times[child_id] = recent
+        ts = _classify_call_times.setdefault(child_id, [])
+        stale = bisect.bisect_left(ts, cutoff)
+        if stale:
+            del ts[:stale]
+        if len(ts) >= config_manager.classify_max_rpm:
             return False
-        recent.append(now)
-        _classify_call_times[child_id] = recent
+        ts.append(now)
         return True
 
 

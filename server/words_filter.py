@@ -65,6 +65,7 @@ class WordsFilter:
         self._automaton: ahocorasick.Automaton | None = None
         self._entry_needs_boundary: dict[str, bool] = {}
         self._all_entries: list[str] = []
+        self._words_cache: list[str] = []
 
     # ------------------------------------------------------------------
     # Public interface
@@ -82,6 +83,7 @@ class WordsFilter:
         """
         normalised = sorted({e.lower() for e in entries if e.strip()})
         self._all_entries = normalised
+        self._words_cache = [e for e in normalised if " " not in e]
         self._entry_needs_boundary = {e: _needs_boundary_check(e) for e in normalised}
 
         if not normalised:
@@ -138,7 +140,7 @@ class WordsFilter:
         ``GET /api/words`` endpoint — multi-word phrases are excluded so the
         API response shape is unchanged.
         """
-        return sorted(e for e in self._all_entries if " " not in e)
+        return self._words_cache
 
     @property
     def entry_count(self) -> int:

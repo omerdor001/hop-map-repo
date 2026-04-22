@@ -13,12 +13,15 @@ _words_refresh_task: asyncio.Task | None = None
 
 
 def load_blocked_words() -> None:
+    global _filter
     try:
         entries = words_repo.get_blocked_words()
-        _filter.build(entries)
+        new_filter = WordsFilter()
+        new_filter.build(entries)
+        _filter = new_filter  # atomic reference swap — callers always see a fully-built filter
         log.info(
             "Blocked entries reloaded: %d total (%d single-word, %d phrase)",
-            _filter.entry_count, len(_filter.words), _filter.entry_count - len(_filter.words),
+            new_filter.entry_count, len(new_filter.words), new_filter.entry_count - len(new_filter.words),
         )
     except Exception as exc:
         log.warning("Failed to reload blocked words from MongoDB: %s", exc)
@@ -50,7 +53,7 @@ async def _refresh_loop() -> None:
             await asyncio.sleep(interval)
         except asyncio.CancelledError:
             return
-        load_blocked_words()
+        await asyncio.to_thread(load_blocked_words)
 
 
 async def start_refresh_task() -> None:
