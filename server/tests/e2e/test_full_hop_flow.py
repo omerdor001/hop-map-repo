@@ -23,7 +23,7 @@ for _p in (_SERVER_DIR, _TESTS_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from test_helpers import find_free_port
+from test_helpers import find_free_port, register_test_child
 
 # The app singleton is already configured by _global_test_setup (tests/conftest.py).
 from server import app as _e2e_app
@@ -50,7 +50,7 @@ def _reset_state(_global_test_setup):
     import classify.service as _cls_svc
     import events.service as _evt_svc
     import words.service as _words_svc
-    from core.database import _pool
+    from core.database import pool
     from config import config_manager
 
     # Re-install mock LLM in case a previous test's TestClient lifespan overwrote it.
@@ -66,9 +66,9 @@ def _reset_state(_global_test_setup):
     }
     _words_svc._filter.build(set())
 
-    _pool.get_collection(config_manager.db.events_collection).delete_many({})
-    _pool.get_collection("children").delete_many({})
-    _pool.get_collection(config_manager.db.words_collection).delete_many({})
+    pool.get_collection(config_manager.db.events_collection).delete_many({})
+    pool.get_collection("children").delete_many({})
+    pool.get_collection(config_manager.db.words_collection).delete_many({})
     yield
 
 
@@ -163,6 +163,7 @@ class TestHopToEventFlow:
             "detection": "confirmed_hop",
             "clickConfidence": "app_match",
         })
+        register_test_child(child)
         events = client.get(f"/api/events/{child}").json()
         assert events["count"] == 1
         assert events["events"][0]["from"] == "robloxplayerbeta.exe"
@@ -175,6 +176,7 @@ class TestHopToEventFlow:
             "detection": "confirmed_hop",
             "clickConfidence": "app_match",
         })
+        register_test_child(child)
         client.delete(f"/api/events/{child}")
         events = client.get(f"/api/events/{child}").json()
         assert events["count"] == 0
@@ -186,6 +188,7 @@ class TestHopToEventFlow:
                 "from": "game.exe", "to": "discord.exe",
                 "detection": "confirmed_hop", "clickConfidence": "app_match",
             })
+            register_test_child(child)
         assert client.get("/api/events/e2e-kid-a").json()["count"] == 1
         assert client.get("/api/events/e2e-kid-b").json()["count"] == 1
 
@@ -249,6 +252,7 @@ def test_sse_broadcast_after_hop(sse_server):
     """POST a hop then verify the SSE stream delivers it to a connected listener."""
     base_url = sse_server
     child = "e2e-sse-kid"
+    register_test_child(child)
 
     import events.service as _evt_svc
     _evt_svc._sse_queues.clear()
@@ -298,6 +302,7 @@ def test_sse_multi_child_isolation(sse_server):
     base_url = sse_server
     child_a = "iso-kid-a"
     child_b = "iso-kid-b"
+    register_test_child(child_b)
 
     import events.service as _evt_svc
     _evt_svc._sse_queues.clear()

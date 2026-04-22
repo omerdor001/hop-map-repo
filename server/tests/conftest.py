@@ -91,8 +91,8 @@ def _global_test_setup():
     import core.database as _db_mod
 
     mock_client = mongomock.MongoClient()
-    _db_mod._pool._client = mock_client
-    _db_mod._pool._db = mock_client[_db_mod._pool.db_name]
+    _db_mod.pool._client = mock_client
+    _db_mod.pool._db = mock_client[_db_mod.pool.db_name]
 
     import words.service as _words_svc
     _words_svc._filter.build(set())

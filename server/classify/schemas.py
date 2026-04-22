@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from config import config_manager
+
 
 class AgentMeResponse(BaseModel):
     childId: str
@@ -30,7 +32,7 @@ class ActivateAgentResponse(BaseModel):
 class ClassifyRequest(BaseModel):
     child_id: str = Field(..., alias="childId")
     url: str = Field(..., max_length=2048)
-    context: str = Field(..., max_length=8192)
+    context: str = Field(..., min_length=1, max_length=config_manager.classify_context_max_chars)
     source: str = Field("unknown", max_length=64)
     model_config = {"populate_by_name": True}
 

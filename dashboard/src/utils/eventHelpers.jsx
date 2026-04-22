@@ -1,8 +1,4 @@
-/**
- * Shared helpers used by both the Homepage timeline and the Alerts timeline.
- * Centralised here to follow the DRY principle and keep each component focused
- * on layout rather than data-mapping logic.
- */
+import { colors, fonts } from "./theme"
 
 export const AVATAR_GRADS = [
   "linear-gradient(135deg,#6366f1,#8b5cf6)",
@@ -11,6 +7,13 @@ export const AVATAR_GRADS = [
   "linear-gradient(135deg,#10b981,#34d399)",
   "linear-gradient(135deg,#f59e0b,#fbbf24)",
 ]
+
+// Severity → display config used by Badge and the Alerts timeline.
+export const typeConfig = {
+  SAFE:   { label: "SAFE",      color: colors.success, bg: "rgba(46,213,115,0.13)"  },
+  MEDIUM: { label: "WARNING",   color: colors.warning,  bg: "rgba(255,165,2,0.13)"   },
+  HIGH:   { label: "HIGH RISK", color: colors.danger,   bg: "rgba(255,71,87,0.13)"   },
+}
 
 export function getInitials(name) {
   if (!name) return "??"
@@ -38,10 +41,6 @@ export function getAppIcon(to) {
   return { icon: "📱", bg: "#1a1d28" }
 }
 
-/**
- * @param {object} event
- * @param {string} [fallback] - Shown when no reason/context/from are available.
- */
 export function getEventDesc(event, fallback = "App switch detected") {
   if (event.classifyReason && event.classifyReason !== "server_unreachable") return event.classifyReason
   if (event.context) return String(event.context).replace(/^\[clipboard\] /, "")
@@ -63,10 +62,46 @@ export function getSeverity(event) {
 }
 
 export function todayDefault() {
-  const d  = new Date()
-  const dd = String(d.getDate()).padStart(2, "0")
-  const mm = String(d.getMonth() + 1).padStart(2, "0")
-  return `${dd}/${mm}/${d.getFullYear()}`
+  const d = new Date()
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0"),
+  ].join("-")
+}
+
+export function Badge({ risk }) {
+  const c = typeConfig[risk]
+  return (
+    <span style={{
+      fontSize: 9, fontWeight: 700, letterSpacing: "0.07em",
+      color: c.color, background: c.bg,
+      border: `1px solid ${c.color}33`,
+      borderRadius: 4, padding: "2px 6px",
+      fontFamily: fonts.mono, whiteSpace: "nowrap",
+    }}>{c.label}</span>
+  )
+}
+
+export function StatCard({ label, val, color, sub }) {
+  return (
+    <div style={{
+      background: colors.surface,
+      border: `1px solid ${colors.border}`,
+      borderTop: `3px solid ${color}`,
+      borderRadius: 10, padding: "12px 14px",
+    }}>
+      <div style={{
+        fontSize: 9, color: colors.muted, letterSpacing: "0.1em",
+        fontFamily: fonts.mono, marginBottom: 5,
+      }}>{label}</div>
+      <div style={{
+        fontSize: 30, fontWeight: 700, color, lineHeight: 1,
+        fontFamily: fonts.mono, marginBottom: 3,
+      }}>{val}</div>
+      <div style={{ fontSize: 10, color: colors.muted }}>{sub}</div>
+    </div>
+  )
 }
 
 export function Dot({ color, pulse }) {

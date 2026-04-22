@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,9 +13,10 @@ class HealthStatus(str, Enum):
 
 
 class MongoDBCheck(BaseModel):
-    status:     HealthStatus
-    latency_ms: float | None = None
-    error:      str   | None = None
+    status:          HealthStatus
+    latency_ms:      float | None = None
+    circuit_breaker: Literal["closed", "open", "half_open"] = "closed"
+    error:           str   | None = None
 
 
 class OllamaCheck(BaseModel):

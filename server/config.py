@@ -16,7 +16,7 @@ Setup:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import (
@@ -53,6 +53,17 @@ class DatabaseConfig(BaseModel):
     words_refresh_interval_seconds: int = Field(
         3600, description="How often (seconds) to reload blocked words from MongoDB", gt=0
     )
+    # Circuit breaker — protects the server from cascading failures when MongoDB
+    # is unreachable.  The circuit opens after this many consecutive connectivity
+    # failures and stays open until recovery_timeout_seconds elapses.
+    # Override: HOPMAP_SERVER__DB__CIRCUIT_BREAKER_FAILURE_THRESHOLD=3
+    circuit_breaker_failure_threshold: int = Field(
+        5, description="Consecutive connectivity failures before the circuit opens", gt=0
+    )
+    # Override: HOPMAP_SERVER__DB__CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECONDS=60
+    circuit_breaker_recovery_timeout_seconds: float = Field(
+        30.0, description="Seconds the circuit stays OPEN before a probe is allowed", gt=0
+    )
 
 
 class LLMConfig(BaseModel):
@@ -73,6 +84,11 @@ class AuthConfig(BaseModel):
     refresh_token_expire_days: int = Field(30, description="Refresh token lifetime in days", gt=0)
     refresh_cookie_name: str = Field("hopmap_refresh", description="Name of the httpOnly refresh token cookie")
     refresh_cookie_secure: bool = Field(False, description="Set True in production (requires HTTPS)")
+    # Rate limits use the slowapi / limits string format: "<count>/<period>"
+    # where period is one of: second, minute, hour, day.
+    # Override: HOPMAP_SERVER__AUTH__LOGIN_RATE_LIMIT="5/minute"
+    login_rate_limit: str = Field("10/minute", description="Max login attempts per IP per window")
+    register_rate_limit: str = Field("5/minute", description="Max registration attempts per IP per window")
 
 
 class DataConfig(BaseModel):
@@ -100,6 +116,20 @@ class ServerConfig(BaseSettings):
     # Maximum classify requests per child per minute.
     classify_max_rpm: int = Field(
         30, description="Max classify calls per child per minute", gt=0
+    )
+
+    # 2 000 = one full Discord message; anything larger dilutes LLM classification accuracy.
+    # Override: HOPMAP_SERVER__CLASSIFY_CONTEXT_MAX_CHARS
+    classify_context_max_chars: int = Field(
+        2000, description="Max characters allowed in the classify context field", gt=0
+    )
+
+    # Deployment environment.  Controls whether secret-validation failures are
+    # fatal (production/staging) or merely logged (development).
+    # Override: HOPMAP_SERVER__ENVIRONMENT=production
+    environment: Literal["development", "staging", "production"] = Field(
+        "development",
+        description="Deployment environment — set to 'production' or 'staging' in live deployments",
     )
 
     # Expose demo-seed endpoints (development / competition demo only).

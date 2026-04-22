@@ -1,26 +1,21 @@
 import { useState, useEffect } from "react"
 import { useAuth } from "../context/AuthContext"
-
-const DARK   = "#0d0d0f"
-const CARD   = "#16161a"
-const BORDER = "#1e1e24"
-const INDIGO = "#6366f1"
-const MUTED  = "#6b7280"
+import { colors, fonts } from "../utils/theme"
 
 const PLANS = [
-  { label: "Free",       maxChildren: 0, description: "No children — just browsing", color: "#4b5563" },
-  { label: "Starter",    maxChildren: 1, description: "1 child",                      color: "#6366f1" },
-  { label: "Family",     maxChildren: 3, description: "Up to 3 children",             color: "#8b5cf6" },
-  { label: "Unlimited",  maxChildren: 10, description: "Up to 10 children",           color: "#ec4899" },
+  { label: "Free",      maxChildren: 0,  description: "No children — just browsing", color: colors.muted   },
+  { label: "Starter",   maxChildren: 1,  description: "1 child",                     color: colors.indigo  },
+  { label: "Family",    maxChildren: 3,  description: "Up to 3 children",            color: "#8b5cf6"      },
+  { label: "Unlimited", maxChildren: 10, description: "Up to 10 children",           color: "#ec4899"      },
 ]
 
 export default function Plan() {
   const { authFetch } = useAuth()
-  const [current, setCurrent] = useState(null)   // current maxChildren from server
-  const [selected, setSelected] = useState(null) // what user picked in UI
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved]   = useState(false)
-  const [error, setError]   = useState("")
+  const [current, setCurrent]   = useState(null)
+  const [selected, setSelected] = useState(null)
+  const [saving, setSaving]     = useState(false)
+  const [saved, setSaved]       = useState(false)
+  const [error, setError]       = useState("")
 
   useEffect(() => {
     authFetch("/api/me")
@@ -56,17 +51,18 @@ export default function Plan() {
     }
   }
 
-  const activePlan = PLANS.find(p => p.maxChildren === current)
+  const activePlan    = PLANS.find(p => p.maxChildren === current)
+  const saveDisabled  = saving || selected === current || current === null
 
   return (
-    <div style={{ padding: "40px 48px", maxWidth: 700, margin: "0 auto" }}>
+    <div style={{ padding: "40px 48px", maxWidth: 700, margin: "0 auto", fontFamily: fonts.sans }}>
       {/* Header */}
       <div style={{ marginBottom: 36 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", color: INDIGO, marginBottom: 6 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", color: colors.indigo, marginBottom: 6, fontFamily: fonts.mono }}>
           ACCOUNT
         </div>
-        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: "#fff" }}>Plan</h1>
-        <p style={{ margin: "8px 0 0", color: MUTED, fontSize: 14 }}>
+        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: colors.text }}>Plan</h1>
+        <p style={{ margin: "8px 0 0", color: colors.muted, fontSize: 14 }}>
           Simulate choosing a plan to unlock child slots.
         </p>
       </div>
@@ -74,15 +70,15 @@ export default function Plan() {
       {/* Current status */}
       {current !== null && (
         <div style={{
-          background: CARD, border: `1px solid ${BORDER}`, borderRadius: 12,
+          background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12,
           padding: "16px 20px", marginBottom: 28, display: "flex", alignItems: "center", gap: 12,
         }}>
           <span style={{ fontSize: 20 }}>📋</span>
           <div>
-            <div style={{ fontSize: 13, color: MUTED }}>Current plan</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#e5e7eb" }}>
+            <div style={{ fontSize: 13, color: colors.muted }}>Current plan</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: colors.text }}>
               {activePlan?.label ?? "Custom"}{" "}
-              <span style={{ fontWeight: 400, color: MUTED, fontSize: 13 }}>
+              <span style={{ fontWeight: 400, color: colors.muted, fontSize: 13 }}>
                 — {current === 0 ? "no children allowed" : `up to ${current} ${current === 1 ? "child" : "children"}`}
               </span>
             </div>
@@ -100,24 +96,24 @@ export default function Plan() {
               onClick={() => setSelected(plan.maxChildren)}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
-                background: isSelected ? `${plan.color}18` : CARD,
-                border: `2px solid ${isSelected ? plan.color : BORDER}`,
+                background: isSelected ? `${plan.color}18` : colors.surface,
+                border: `2px solid ${isSelected ? plan.color : colors.border}`,
                 borderRadius: 12, padding: "18px 22px", cursor: "pointer", textAlign: "left",
                 transition: "border-color 0.15s, background 0.15s",
+                fontFamily: fonts.sans,
               }}
             >
               <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: isSelected ? "#fff" : "#e5e7eb" }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: isSelected ? colors.text : colors.text }}>
                   {plan.label}
                 </div>
-                <div style={{ fontSize: 13, color: MUTED, marginTop: 2 }}>{plan.description}</div>
+                <div style={{ fontSize: 13, color: colors.muted, marginTop: 2 }}>{plan.description}</div>
               </div>
-              {/* Simulated price badge */}
               <div style={{
                 fontSize: 13, fontWeight: 700,
-                color: isSelected ? plan.color : MUTED,
+                color: isSelected ? plan.color : colors.muted,
                 background: isSelected ? `${plan.color}22` : "transparent",
-                border: `1px solid ${isSelected ? plan.color : BORDER}`,
+                border: `1px solid ${isSelected ? plan.color : colors.border}`,
                 borderRadius: 8, padding: "4px 12px",
               }}>
                 {plan.maxChildren === 0 ? "Free" : plan.maxChildren === 1 ? "$4/mo" : plan.maxChildren === 3 ? "$9/mo" : "$15/mo"}
@@ -130,26 +126,26 @@ export default function Plan() {
       {/* Save */}
       {error && (
         <div style={{
-          background: "#2d1515", border: "1px solid #7f1d1d", borderRadius: 8,
-          color: "#fca5a5", fontSize: 13, padding: "10px 14px", marginBottom: 16,
+          background: "rgba(255,71,87,0.08)", border: `1px solid rgba(255,71,87,0.3)`, borderRadius: 8,
+          color: colors.danger, fontSize: 13, padding: "10px 14px", marginBottom: 16,
         }}>
           {error}
         </div>
       )}
       <button
         onClick={handleSave}
-        disabled={saving || selected === current || current === null}
+        disabled={saveDisabled}
         style={{
-          background: (saving || selected === current || current === null) ? "#2a2a35" : INDIGO,
-          color: (saving || selected === current || current === null) ? MUTED : "#fff",
+          background: saveDisabled ? colors.surface : colors.indigo,
+          color: saveDisabled ? colors.muted : "#fff",
           border: "none", borderRadius: 8, fontSize: 14, fontWeight: 700,
-          padding: "11px 28px", cursor: (saving || selected === current || current === null) ? "not-allowed" : "pointer",
+          padding: "11px 28px", cursor: saveDisabled ? "not-allowed" : "pointer",
           transition: "background 0.15s",
         }}
       >
         {saving ? "Saving…" : saved ? "✓ Plan updated" : "Apply plan"}
       </button>
-      <p style={{ fontSize: 12, color: "#374151", marginTop: 12 }}>
+      <p style={{ fontSize: 12, color: colors.muted, marginTop: 12 }}>
         This is a simulation — no real payment is processed.
       </p>
     </div>

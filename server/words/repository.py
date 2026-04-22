@@ -6,14 +6,14 @@ import openpyxl
 from pymongo.errors import DuplicateKeyError
 from pymongo import UpdateOne
 
-from core.database import _pool
+from core.database import pool
 from config import config_manager
 
 logger = logging.getLogger(__name__)
 
 
 def _col_words():
-    return _pool.get_collection(config_manager.db.words_collection)
+    return pool.get_collection(config_manager.db.words_collection)
 
 
 def get_blocked_words() -> set[str]:

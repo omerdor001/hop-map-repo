@@ -1,10 +1,10 @@
 from datetime import datetime, timezone
 
-from core.database import _pool
+from core.database import pool
 
 
 def _col_children():
-    return _pool.get_collection("children")
+    return pool.get_collection("children")
 
 
 def register_child(child_id: str, child_name: str, parent_id: str, agent_token_hash: str, agent_token_prefix: str) -> None:

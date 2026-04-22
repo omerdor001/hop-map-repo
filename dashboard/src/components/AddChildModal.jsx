@@ -1,6 +1,7 @@
 import { useState } from "react"
 import Modal from "./Modal"
 import { useAuth } from "../context/AuthContext"
+import config from "../config"
 
 // ─── Design tokens (match existing dashboard palette) ───────────────────────
 const DARK   = "#0d0d0f"
@@ -174,7 +175,7 @@ function StepInstaller({ result, onDone }) {
     try {
       const params = new URLSearchParams({
         childId:    childId,
-        backendUrl: `${window.location.protocol}//${window.location.hostname}:8000`,
+        backendUrl: config.backendUrl,
       })
       const res = await authFetch(`/agent/installer?${params}`)
       if (!res.ok) throw new Error(`Server returned ${res.status}`)

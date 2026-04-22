@@ -32,8 +32,8 @@ def db_mod():
     mock_client = mongomock.MongoClient()
 
     import core.database as _core_db
-    _core_db._pool._client = mock_client
-    _core_db._pool._db = mock_client[_core_db._pool.db_name]
+    _core_db.pool._client = mock_client
+    _core_db.pool._db = mock_client[_core_db.pool.db_name]
 
     import auth.repository as auth_repo
     import children.repository as child_repo
@@ -81,45 +81,45 @@ def db_mod():
 
         @staticmethod
         def _col_events():
-            from core.database import _pool
+            from core.database import pool
             from config import config_manager
-            return _pool.get_collection(config_manager.db.events_collection)
+            return pool.get_collection(config_manager.db.events_collection)
 
         @staticmethod
         def _col_children():
-            from core.database import _pool
-            return _pool.get_collection("children")
+            from core.database import pool
+            return pool.get_collection("children")
 
         @staticmethod
         def _col_words():
-            from core.database import _pool
+            from core.database import pool
             from config import config_manager
-            return _pool.get_collection(config_manager.db.words_collection)
+            return pool.get_collection(config_manager.db.words_collection)
 
         @staticmethod
         def _col_users():
-            from core.database import _pool
-            return _pool.get_collection("users")
+            from core.database import pool
+            return pool.get_collection("users")
 
         @staticmethod
         def _col_sessions():
-            from core.database import _pool
-            return _pool.get_collection("sessions")
+            from core.database import pool
+            return pool.get_collection("sessions")
 
         @staticmethod
         def _col_notifications():
-            from core.database import _pool
-            return _pool.get_collection("notifications")
+            from core.database import pool
+            return pool.get_collection("notifications")
 
         @staticmethod
         def ping():
-            from core.database import _pool
-            return _pool.ping()
+            from core.database import pool
+            return pool.ping()
 
         @property
         def _pool(self):
-            from core.database import _pool
-            return _pool
+            from core.database import pool
+            return pool
 
     return DbFacade()
 

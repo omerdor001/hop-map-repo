@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import pytest
 
+from test_helpers import register_test_child
+
 
 CHILD_ID = "inttest-hop-child"
 
@@ -41,6 +43,7 @@ class TestHopEndpointIngestion:
         }
         client.post(f"/agent/hop/{CHILD_ID}", json=body)
 
+        register_test_child(CHILD_ID)
         events_resp = client.get(f"/api/events/{CHILD_ID}")
         assert events_resp.status_code == 200
         data = events_resp.json()
@@ -59,6 +62,7 @@ class TestHopEndpointIngestion:
         }
         client.post(f"/agent/hop/{child}", json=body)
 
+        register_test_child(child)
         events_resp = client.get(f"/api/events/{child}")
         assert events_resp.json()["count"] == 0
 
@@ -73,6 +77,7 @@ class TestHopEndpointIngestion:
         }
         client.post(f"/agent/hop/{child}", json=body)
 
+        register_test_child(child)
         events_resp = client.get(f"/api/events/{child}")
         assert events_resp.json()["count"] == 0
 

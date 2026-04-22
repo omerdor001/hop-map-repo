@@ -5,6 +5,7 @@ from config import config_manager
 from auth.dependencies import get_current_user
 from auth.schemas import RegisterRequest
 from auth import service
+from core.rate_limit import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -28,14 +29,16 @@ def _clear_refresh_cookie(response: Response) -> None:
 
 
 @router.post("/register", status_code=201)
-async def auth_register(body: RegisterRequest, response: Response) -> dict:
+@limiter.limit(config_manager.auth.register_rate_limit)
+async def auth_register(request: Request, body: RegisterRequest, response: Response) -> dict:
     access_token, raw_refresh, user = service.register(body.email, body.password, body.display_name)
     _set_refresh_cookie(response, raw_refresh)
     return {"accessToken": access_token, "tokenType": "bearer", "user": user}
 
 
 @router.post("/login")
-async def auth_login(response: Response, form: OAuth2PasswordRequestForm = Depends()) -> dict:
+@limiter.limit(config_manager.auth.login_rate_limit)
+async def auth_login(request: Request, response: Response, form: OAuth2PasswordRequestForm = Depends()) -> dict:
     access_token, raw_refresh, user = service.login(form.username, form.password)
     _set_refresh_cookie(response, raw_refresh)
     return {"accessToken": access_token, "tokenType": "bearer", "user": user}

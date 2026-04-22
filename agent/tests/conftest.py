@@ -84,3 +84,11 @@ if "agent" not in sys.modules:
     _agent_mod = _ilu.module_from_spec(_agent_spec)
     sys.modules["agent"] = _agent_mod      # cache before exec to handle self-imports
     _agent_spec.loader.exec_module(_agent_mod)
+
+# agent.py installs a StreamHandler on "hopmap-agent" at module level, before
+# pytest's per-test stderr capture is in place, so it writes to the real
+# terminal and bypasses log suppression.  Replace it with NullHandler here so
+# pytest's own log capture takes over (logs still appear in failure reports).
+import logging as _logging
+_hopmap_log = _logging.getLogger("hopmap-agent")
+_hopmap_log.handlers = [_logging.NullHandler()]
