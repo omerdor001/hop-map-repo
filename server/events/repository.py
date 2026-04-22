@@ -13,8 +13,13 @@ def insert_event(doc: dict) -> str:
     return str(result.inserted_id)
 
 
-def get_events(child_id: str) -> list[dict]:
-    cursor = _col_events().find({"childId": child_id}, {"_id": 0}).sort("timestamp", DESCENDING)
+def get_events(child_id: str, limit: int = 0) -> list[dict]:
+    cursor = (
+        _col_events()
+        .find({"childId": child_id}, {"_id": 0})
+        .sort("timestamp", DESCENDING)
+        .limit(limit)
+    )
     return list(cursor)
 
 

@@ -65,6 +65,6 @@ async def stop_refresh_task() -> None:
 
 
 def seed_if_empty(words_path: str) -> None:
-    if not words_repo.get_blocked_words() and words_path and os.path.exists(words_path):
+    if not words_repo.has_words() and words_path and os.path.exists(words_path):
         seeded = words_repo.seed_words_from_excel(words_path)
         log.info("Seeded %d words from Excel into MongoDB words collection", seeded)

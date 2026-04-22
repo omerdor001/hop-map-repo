@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pytest
 
+from core.database import pool
+
 
 class TestListChildren:
 
@@ -95,3 +97,18 @@ class TestRenameChild:
         client, _ = app_client
         resp = client.patch("/api/children/bad id!", json={"childName": "NewName"})
         assert resp.status_code == 400
+
+    def test_rename_rejects_other_parents_child(self, app_client):
+        """Renaming a child owned by a different parent must return 404 and leave the DB unchanged."""
+        client, _ = app_client
+        pool.get_collection("children").insert_one({
+            "childId": "other-parents-kid",
+            "childName": "OriginalName",
+            "parentId": "other-parent-id",
+            "agentTokenHash": "dummy",
+            "agentTokenPrefix": "dum",
+        })
+        resp = client.patch("/api/children/other-parents-kid", json={"childName": "Stolen"})
+        assert resp.status_code == 404
+        doc = pool.get_collection("children").find_one({"childId": "other-parents-kid"})
+        assert doc["childName"] == "OriginalName"

@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from auth.dependencies import get_current_user
@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["events"])
 
 _HEARTBEAT_INTERVAL: float = 15.0
+_SSE_HISTORY_LIMIT: int = 100
 
 
 @router.get("/stream/{child_id}")
@@ -37,7 +38,7 @@ async def stream(
 
     async def generator():
         try:
-            history = event_repo.get_events(child_id)
+            history = event_repo.get_events(child_id, limit=_SSE_HISTORY_LIMIT)
         except Exception as exc:
             log.warning("SSE: failed to load history for child=%r: %s", child_id, exc)
             history = []
@@ -67,11 +68,15 @@ async def stream(
 
 
 @router.get("/api/events/{child_id}")
-def get_events(child_id: str, limit: int = 100, current_user: dict = Depends(get_current_user)) -> dict:
+def get_events(
+    child_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     validate_child_id(child_id)
     if not get_child_by_id(child_id, current_user["id"]):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Child not found or not yours.")
-    events = event_repo.get_events(child_id)[: max(1, min(limit, 500))]
+    events = event_repo.get_events(child_id, limit=limit)
     return {"childId": child_id, "events": events, "count": len(events)}
 
 

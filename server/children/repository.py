@@ -21,9 +21,9 @@ def register_child(child_id: str, child_name: str, parent_id: str, agent_token_h
     )
 
 
-def rename_child(child_id: str, child_name: str) -> bool:
+def rename_child(child_id: str, parent_id: str, child_name: str) -> bool:
     result = _col_children().update_one(
-        {"childId": child_id},
+        {"childId": child_id, "parentId": parent_id},
         {"$set": {"childName": child_name}},
     )
     return result.modified_count > 0

@@ -272,16 +272,20 @@ class TestRenameChild:
 
     def test_returns_true_on_success(self, db_mod):
         _register(db_mod, "kid-8", "Hank", _PARENT_A)
-        assert db_mod.rename_child("kid-8", "Hank 2") is True
+        assert db_mod.rename_child("kid-8", _PARENT_A, "Hank 2") is True
 
     def test_name_is_updated(self, db_mod):
         _register(db_mod, "kid-9", "Iris", _PARENT_A)
-        db_mod.rename_child("kid-9", "Iris 2")
+        db_mod.rename_child("kid-9", _PARENT_A, "Iris 2")
         children = {c["childId"]: c["childName"] for c in db_mod.get_children(_PARENT_A)}
         assert children["kid-9"] == "Iris 2"
 
     def test_returns_false_for_unknown_id(self, db_mod):
-        assert db_mod.rename_child("nobody", "Ghost") is False
+        assert db_mod.rename_child("nobody", _PARENT_A, "Ghost") is False
+
+    def test_returns_false_for_wrong_parent(self, db_mod):
+        _register(db_mod, "kid-10", "Jack", _PARENT_A)
+        assert db_mod.rename_child("kid-10", _PARENT_B, "Jack 2") is False
 
 
 # ---------------------------------------------------------------------------

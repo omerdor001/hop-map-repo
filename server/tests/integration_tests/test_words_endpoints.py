@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import pytest
 
+from words import repository as words_repo
+
 
 class TestWordsEndpoints:
 
@@ -86,3 +88,15 @@ class TestWordsEndpoints:
         client, _ = app_client
         res = client.post("/api/words", json={})
         assert res.status_code == 422
+
+
+class TestHasWords:
+
+    def test_returns_false_when_collection_is_empty(self, app_client):
+        # app_client clears the words collection before each test.
+        assert words_repo.has_words() is False
+
+    def test_returns_true_when_word_exists(self, app_client):
+        client, _ = app_client
+        client.post("/api/words", json={"word": "sentinel_has_words_xyz"})
+        assert words_repo.has_words() is True
