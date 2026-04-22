@@ -2,6 +2,28 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 
 const AuthContext = createContext(null)
 
+/**
+ * Extract a human-readable message from a FastAPI error response body.
+ *
+ * FastAPI returns two shapes:
+ *   - HTTPException  → { detail: "string message" }
+ *   - Pydantic error → { detail: [{ msg: "Value error, ..." }, ...] }
+ *
+ * Pydantic prefixes every validator message with "Value error, " — strip it
+ * so the UI shows "Password must contain …" not "Value error, Password must…".
+ */
+function _extractDetail(body, fallback) {
+  if (!body?.detail) return fallback
+  if (typeof body.detail === "string") return body.detail
+  if (Array.isArray(body.detail)) {
+    return body.detail
+      .map(e => (e.msg ?? "").replace(/^Value error,\s*/i, "").trim())
+      .filter(Boolean)
+      .join(" ")
+  }
+  return fallback
+}
+
 export function AuthProvider({ children }) {
   const [accessToken, setAccessToken] = useState(null)
   const [user, setUser]               = useState(null)
@@ -47,8 +69,8 @@ export function AuthProvider({ children }) {
       body: new URLSearchParams({ username: email, password }),
     })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw new Error(err.detail || "Login failed")
+      const body = await res.json().catch(() => ({}))
+      throw new Error(_extractDetail(body, "Login failed"))
     }
     const data = await res.json()
     setToken(data.accessToken)
@@ -64,8 +86,8 @@ export function AuthProvider({ children }) {
       body: JSON.stringify({ email, password, displayName }),
     })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      throw new Error(err.detail || "Registration failed")
+      const body = await res.json().catch(() => ({}))
+      throw new Error(_extractDetail(body, "Registration failed"))
     }
     const data = await res.json()
     setToken(data.accessToken)

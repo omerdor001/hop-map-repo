@@ -23,7 +23,7 @@ for _p in (_SERVER_DIR, _TESTS_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from test_helpers import find_free_port
+from test_helpers import find_free_port, register_test_child
 
 # The app singleton is already configured by _global_test_setup.
 from server import app as _app
@@ -93,6 +93,7 @@ def _collect_sse(base_url: str, child_id: str, max_events: int = 1,
 def test_sse_history_message_on_connect(live_sse_server):
     """Connecting to /stream/{child_id} must immediately yield a history event."""
     base_url = live_sse_server
+    register_test_child("sse-test-kid")
     events = _collect_sse(base_url, "sse-test-kid", max_events=1)
 
     assert len(events) == 1
@@ -104,6 +105,7 @@ def test_sse_history_contains_existing_events(live_sse_server):
     """Events already in DB at connect time should appear in the history message."""
     base_url = live_sse_server
     child = "history-content-kid"
+    register_test_child(child)
 
     import events.repository as _evt_repo
     _evt_repo._col_events().delete_many({"childId": child})
@@ -131,6 +133,7 @@ def test_sse_ping_heartbeat_received(live_sse_server, monkeypatch):
     monkeypatch.setattr(_sse_router, "_HEARTBEAT_INTERVAL", 0.2)
 
     base_url = live_sse_server
+    register_test_child("ping-test-kid")
     ping_received = False
     with requests.get(f"{base_url}/stream/ping-test-kid", stream=True, timeout=5.0) as resp:
         assert resp.status_code == 200

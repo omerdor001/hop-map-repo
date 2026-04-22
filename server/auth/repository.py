@@ -5,15 +5,15 @@ from bson.errors import InvalidId
 from pymongo import DESCENDING
 from pymongo.errors import DuplicateKeyError
 
-from core.database import _pool
+from core.database import pool
 
 
 def _col_users():
-    return _pool.get_collection("users")
+    return pool.get_collection("users")
 
 
 def _col_sessions():
-    return _pool.get_collection("sessions")
+    return pool.get_collection("sessions")
 
 
 def create_user(email: str, password_hash: str, display_name: str) -> str:

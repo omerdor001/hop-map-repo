@@ -18,10 +18,16 @@ import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from config import APP_VERSION, config_manager
+from core.db_circuit_breaker import DatabaseCircuitOpenError
+from core.rate_limit import limiter
+from core.startup import validate_secrets
 from llm import get_provider
 
 # Feature routers
@@ -55,8 +61,44 @@ logging.basicConfig(
 log = logging.getLogger("hopmap-server")
 
 
+async def _on_db_circuit_open(request: Request, exc: DatabaseCircuitOpenError) -> JSONResponse:
+    """Return 503 when the MongoDB circuit breaker is OPEN.
+
+    Includes Retry-After so well-behaved clients back off instead of hammering
+    the server.  The value is conservative — the circuit timeout is configurable
+    and may be longer, but clients should not assume the exact remaining window.
+    """
+    # Cap Retry-After at 60 s regardless of the configured recovery timeout.
+    # Clients should not be told to wait the full circuit timeout (which may
+    # be several minutes); a shorter hint keeps them from giving up entirely
+    # while the circuit self-heals.
+    retry_after = min(int(config_manager.db.circuit_breaker_recovery_timeout_seconds), 60)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database temporarily unavailable. Please try again later."},
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+async def _on_rate_limit_exceeded(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """Return 429 in the same {detail: ...} shape FastAPI uses for HTTPException.
+
+    Also sets Retry-After per RFC 6585 §4 so clients can back off correctly.
+    """
+    response = JSONResponse(
+        status_code=429,
+        content={"detail": "Too many requests. Please try again later."},
+    )
+    response.headers["Retry-After"] = str(exc.retry_after) if hasattr(exc, "retry_after") else "60"
+    view_rate_limit = getattr(request.state, "view_rate_limit", None)
+    if view_rate_limit is not None:
+        response = request.app.state.limiter._inject_headers(response, view_rate_limit)
+    return response
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_secrets(config_manager)
     log.info("HopMap server starting.")
 
     # Initialize LLM provider
@@ -77,6 +119,9 @@ async def lifespan(app: FastAPI):
     words_service.load_blocked_words()
     await words_service.start_refresh_task()
 
+    # Start background sweep that evicts stale per-child rate-limit entries
+    await classify_service.start_sweep_task()
+
     # Load platform→process mappings
     platforms_service.load_platforms_db()
 
@@ -84,12 +129,20 @@ async def lifespan(app: FastAPI):
     yield
 
     log.info("HopMap server shutting down.")
+    await classify_service.stop_sweep_task()
     await words_service.stop_refresh_task()
     await event_service.shutdown_all()
 
 
 app = FastAPI(title="HopMap API", version=APP_VERSION, lifespan=lifespan)
 
+app.state.limiter = limiter
+app.add_exception_handler(DatabaseCircuitOpenError, _on_db_circuit_open)
+app.add_exception_handler(RateLimitExceeded, _on_rate_limit_exceeded)
+
+# SlowAPIMiddleware must be added before CORSMiddleware so that rate-limited
+# requests are rejected before CORS headers are processed.
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config_manager.network.cors_origins,

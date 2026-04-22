@@ -4,11 +4,11 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo import DESCENDING
 
-from core.database import _pool
+from core.database import pool
 
 
 def _col_notifications():
-    return _pool.get_collection("notifications")
+    return pool.get_collection("notifications")
 
 
 def insert_notification(parent_id: str, child_id: str, event_id: str, notif_type: str, message: str) -> str:
