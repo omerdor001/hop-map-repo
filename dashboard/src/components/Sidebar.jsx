@@ -1,5 +1,6 @@
 import { useNavigate, useLocation } from "react-router-dom"
 import { colors, fonts } from "../utils/theme"
+import { useAuth } from "../context/AuthContext"
 
 const sideNav = [
   { section: "MONITOR", items: [
@@ -14,6 +15,7 @@ const sideNav = [
 export default function Sidebar() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { logout } = useAuth()
 
   return (
     <aside style={{
@@ -63,6 +65,20 @@ export default function Sidebar() {
           })}
         </div>
       ))}
+      {/* Sign out */}
+      <div style={{ marginTop: "auto" }}>
+        <div style={{ height: 1, background: colors.border, margin: "0 20px 12px" }} />
+        <button onClick={logout} style={{
+          display: "flex", alignItems: "center", gap: 10,
+          width: "100%", padding: "9px 20px", border: "none", cursor: "pointer",
+          background: "transparent", borderLeft: "3px solid transparent",
+          color: colors.muted, fontSize: 14, fontWeight: 400,
+          transition: "all 0.15s", textAlign: "left", fontFamily: fonts.sans,
+        }}>
+          <span style={{ fontSize: 15 }}>→</span>
+          <span>Sign out</span>
+        </button>
+      </div>
     </aside>
   )
 }
