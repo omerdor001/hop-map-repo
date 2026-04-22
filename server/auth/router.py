@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 
 from config import config_manager
@@ -48,7 +48,6 @@ async def auth_login(request: Request, response: Response, form: OAuth2PasswordR
 async def auth_refresh(request: Request, response: Response) -> dict:
     raw_token = request.cookies.get(config_manager.auth.refresh_cookie_name)
     if not raw_token:
-        from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Missing refresh token.")
     access_token, new_raw = service.refresh(raw_token)
     _set_refresh_cookie(response, new_raw)
