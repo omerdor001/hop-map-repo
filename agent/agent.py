@@ -54,8 +54,10 @@ Run with:
 
 from __future__ import annotations
 
+import concurrent.futures
 import ctypes
 import ctypes.wintypes
+import hashlib
 import json
 import logging
 import os
@@ -620,6 +622,12 @@ class _TTLCache:
 # scanner restarts and clipboard re-reads within the TTL window.
 _url_seen_global: _TTLCache = _TTLCache(ttl_seconds=300)
 
+# Shared pool for classify-dispatch tasks — caps concurrent HTTP classify
+# calls to 2 and reuses threads instead of spawning one per URL.
+_classify_pool = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="classify-dispatch"
+)
+
 
 # ---------------------------------------------------------------------------
 # Classification result
@@ -718,16 +726,19 @@ def _hwnd_rect(hwnd: int) -> tuple[int, int, int, int] | None:
 # ---------------------------------------------------------------------------
 
 
-def _ocr_window(hwnd: int) -> str:
-    """Screenshot *hwnd* and return all Tesseract-extracted text."""
+def _grab_window(hwnd: int, sct):
+    """Screenshot *hwnd* and return the raw mss frame, or ``None`` if minimised."""
     region = _hwnd_rect(hwnd)
     if region is None:
-        return ""
+        return None
     left, top, w, h = region
-    with mss.mss() as sct:
-        raw = sct.grab({"left": left, "top": top, "width": w, "height": h})
-        img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
-    return pytesseract.image_to_string(img)
+    return sct.grab({"left": left, "top": top, "width": w, "height": h})
+
+
+def _ocr_frame(raw) -> str:
+    """Run Tesseract on a raw mss frame and return all extracted text."""
+    img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX").convert("L")
+    return pytesseract.image_to_string(img, config="--oem 1 --psm 11")
 
 
 # ---------------------------------------------------------------------------
@@ -1033,39 +1044,73 @@ def _scanner_loop(
     game_title: str,
     stop: threading.Event,
 ) -> None:
-    """Periodically OCR the game window and classify every new URL found."""
+    """Periodically OCR the game window and classify every new URL found.
+
+    Frame-hash short-circuit
+    ------------------------
+    Tesseract OCR is by far the most expensive operation in the agent — it
+    spawns a ``tesseract.exe`` subprocess and processes the full game window
+    on every tick.  During real gameplay the chat region is static for long
+    stretches (matches, menus, cutscenes), so the captured screenshot is
+    often byte-identical to the previous one.
+
+    We therefore hash the raw BGRA buffer (blake2b, 16-byte digest, ~5-15 ms
+    on a few MB) and skip the OCR pipeline entirely when the hash matches
+    the previous tick.  This is safe because:
+
+      * Any URL we would have re-extracted is already deduped by the global
+        :data:`_url_seen_global` TTL cache, so reusing the previous result
+        is a no-op for downstream classification.
+      * The cache is per-scanner-session (a local variable here), so it is
+        implicitly reset whenever the foreground game changes.
+      * On any OCR failure the hash is *not* recorded, so a transient error
+        cannot suppress the next identical frame.
+    """
     log.info("Monitoring game: %s", game_proc)
+    sct = mss.mss()
+    last_frame_hash: bytes | None = None
+    try:
+        while not stop.is_set():
+            try:
+                raw = _grab_window(hwnd, sct)
+                if raw is None:
+                    stop.wait(config_manager.scan_interval_seconds)
+                    continue
 
-    while not stop.is_set():
-        try:
-            text = _ocr_window(hwnd)
-        except pytesseract.TesseractNotFoundError:
-            log.error(
-                "Tesseract binary not found.  "
-                "Install from https://github.com/UB-Mannheim/tesseract/wiki "
-                "and restart the agent."
-            )
-            return  # No point retrying on every tick.
-        except Exception as exc:
-            log.warning("OCR error: %s", exc)
-            stop.wait(config_manager.scan_interval_seconds)
-            continue
+                frame_hash = hashlib.blake2b(raw.bgra, digest_size=16).digest()
+                if frame_hash == last_frame_hash:
+                    log.debug("Frame unchanged — skipping OCR.")
+                    stop.wait(config_manager.scan_interval_seconds)
+                    continue
 
-        for url in _find_urls(text):
-            if _url_seen_global.seen(url):
+                text = _ocr_frame(raw)
+                last_frame_hash = frame_hash
+            except pytesseract.TesseractNotFoundError:
+                log.error(
+                    "Tesseract binary not found.  "
+                    "Install from https://github.com/UB-Mannheim/tesseract/wiki "
+                    "and restart the agent."
+                )
+                return  # No point retrying on every tick.
+            except Exception as exc:
+                log.warning("OCR error: %s", exc)
+                stop.wait(config_manager.scan_interval_seconds)
                 continue
 
-            context = _extract_context(text, url)
-            log.info("Link detected: %s", url)
+            for url in _find_urls(text):
+                if _url_seen_global.seen(url):
+                    continue
 
-            threading.Thread(
-                target=_decide_and_send,
-                args=(url, context, game_proc, game_title, "ocr"),
-                daemon=True,
-                name="classify-dispatch",
-            ).start()
+                context = _extract_context(text, url)
+                log.info("Link detected: %s", url)
 
-        stop.wait(config_manager.scan_interval_seconds)
+                _classify_pool.submit(
+                    _decide_and_send, url, context, game_proc, game_title, "ocr"
+                )
+
+            stop.wait(config_manager.scan_interval_seconds)
+    finally:
+        sct.close()
 
     log.info("Stopped monitoring: %s", game_proc)
 
@@ -1107,18 +1152,9 @@ def _clipboard_monitor_loop(stop: threading.Event) -> None:
                 if _url_seen_global.seen(url):
                     continue
                 log.info("Link in clipboard: %s", url)
-                threading.Thread(
-                    target=_decide_and_send,
-                    args=(
-                        url,
-                        f"[clipboard] {url}",
-                        game_proc,
-                        game_title,
-                        "clipboard",
-                    ),
-                    daemon=True,
-                    name="classify-dispatch",
-                ).start()
+                _classify_pool.submit(
+                    _decide_and_send, url, f"[clipboard] {url}", game_proc, game_title, "clipboard"
+                )
 
         stop.wait(1.0)
 
@@ -1294,10 +1330,21 @@ def _event_processor_loop() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _set_process_priority() -> None:
+    """Lower this process to below-normal priority so the game gets CPU first."""
+    try:
+        psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        log.info("Process priority set to below-normal.")
+    except (psutil.AccessDenied, AttributeError):
+        log.debug("Could not lower process priority.")
+
+
 def run() -> None:
     """Start all background threads, register the Win32 hook, and pump the
     Windows message loop until Ctrl-C is pressed."""
     global _prev_proc, _prev_title, _current_scanner_stop, _current_game
+
+    _set_process_priority()
 
     # Fetch platform mappings from the server (falls back to built-in defaults
     # if the server is unreachable — agent still starts normally either way).
