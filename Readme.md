@@ -7,7 +7,7 @@
 ![MongoDB](https://img.shields.io/badge/MongoDB-7.0+-47A248)
 ![Ollama](https://img.shields.io/badge/Ollama-local--inference-black)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D4)
-![Tests](https://img.shields.io/badge/tests-592%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-600%20passing-brightgreen)
 ![Maintained](https://img.shields.io/badge/maintained-yes-brightgreen)
 
 A full-stack child safety platform that detects and alerts parents when children attempt to "hop" from moderated gaming environments to unmoderated external platforms in real time.
@@ -24,7 +24,7 @@ HopMap monitors a child's Windows gaming session and uses LLM-powered classifica
 - **Parent Dashboard** — React 19 frontend with live SSE event streaming, child profiles, alert history, one-click installer download, and whitelist/blacklist management
 - **MongoDB Database** — Persistent storage for hop events, children, auth sessions, notifications, and blocked words
 - **Health Checks** — `/health/live` and `/health/ready` endpoints reporting MongoDB, Ollama, and words-filter status
-- **Test Suite** — 592 passing tests across unit, integration, and E2E layers
+- **Test Suite** — 600 passing tests across unit, integration, and E2E layers
 
 ## 🚀 Quick Start
 
@@ -147,11 +147,13 @@ hop-map-repo/
 │   └── tests/
 │       ├── conftest.py                 # Windows-only stub injection
 │       ├── test_classify_agent.py      # 10 tests
-│       ├── test_config.py              # 10 tests
+│       ├── test_config.py              #  9 tests
 │       ├── test_game_detection.py      # 16 tests
-│       ├── test_platform_fetch.py      # 11 tests
+│       ├── test_ocr_helpers.py         #  6 tests
+│       ├── test_platform_fetch.py      # 19 tests
+│       ├── test_process_priority.py    #  2 tests
 │       ├── test_pure_utils.py          # 22 tests
-│       └── test_ttl_cache.py           # 9 tests
+│       └── test_ttl_cache.py           #  9 tests
 │
 ├── server/                             # FastAPI server
 │   ├── server.py                       # App entry-point — routers, lifespan, CORS
@@ -395,7 +397,7 @@ Config priority (highest first): environment variables → `.env` file → `serv
 
 ## 🧪 Testing
 
-592 tests passing across unit, integration, and E2E layers with 0 failures.
+600 tests passing across unit, integration, and E2E layers with 0 failures.
 
 ### Running Tests
 
@@ -413,11 +415,13 @@ python -m pytest agent/tests/ -v
 ### Test Structure
 
 ```
-agent/tests/                    85 tests
+agent/tests/                    93 tests
 ├── test_classify_agent.py      10 — LLM happy/error paths, response parsing
 ├── test_config.py               9 — defaults, URL normalisation, JSON loading
 ├── test_game_detection.py      16 — Epic/Riot/Registry detection, caching
+├── test_ocr_helpers.py          6 — _grab_window region mapping, _ocr_frame pipeline contract
 ├── test_platform_fetch.py      19 — server fetch, fallback on errors, registration
+├── test_process_priority.py     2 — below-normal priority best-effort behaviour
 ├── test_pure_utils.py          22 — URL regex, domain parsing, context extraction
 └── test_ttl_cache.py            9 — TTL cache ops, expiry, size bound, thread safety
 
@@ -435,10 +439,10 @@ server/tests/                  507 tests
 │   ├── test_sse_stream.py           4 — SSE connection, event delivery
 │   └── test_words_endpoints.py     11 — words CRUD, duplicate, normalise, reload
 └── unit_tests/
-    ├── test_auth.py               57 — JWT, bcrypt, token rotation, password complexity
+    ├── test_auth.py                57 — JWT, bcrypt, token rotation, password complexity
     ├── test_circuit_breaker.py    54 — LLM circuit breaker open/closed/half-open states
     ├── test_db_circuit_breaker.py 55 — DB circuit breaker states, thread safety, proxy
-    ├── test_db_unit.py            68 — connection pool, ping, collection helpers
+    ├── test_db_unit.py             68 — connection pool, ping, collection helpers
     ├── test_events_service.py     27 — listener lifecycle, broadcast, snapshot safety
     ├── test_health_checks.py      51 — MongoDB/Ollama/words-filter health + circuit state
     ├── test_llm_base.py           16 — LLM provider abstraction, classify contract
