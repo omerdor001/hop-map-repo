@@ -44,6 +44,11 @@ Schema:
 }
 """
 
+# _classify_call_times is an in-process sliding-window store.
+# Single-worker constraint: with uvicorn --workers N each worker tracks its
+# own counter independently, multiplying the effective rate limit by N.
+# The startup validator (core/startup.py _check_multi_worker) refuses to start
+# with workers > 1 and no Redis URL, ensuring this dict is only used safely.
 # { child_id: [monotonic_timestamp, …] }
 # Timestamps are always appended in order; ts[-1] is always the most-recent call.
 _classify_call_times: dict[str, list[float]] = {}

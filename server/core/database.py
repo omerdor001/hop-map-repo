@@ -4,7 +4,7 @@ from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, PyMongoError
 
 from config import config_manager
-from core.db_circuit_breaker import DatabaseCircuitBreaker, _ProtectedCollection
+from core.db_circuit_breaker import DatabaseCircuitBreaker, ProtectedCollection
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class DatabasePool:
             self._client = None
             self._db     = None
 
-    def get_collection(self, name: str) -> _ProtectedCollection:
+    def get_collection(self, name: str) -> ProtectedCollection:
         """Return a circuit-breaker-protected proxy for the named collection.
 
         The proxy calls guard() before every operation, so DatabaseCircuitOpenError
@@ -69,7 +69,7 @@ class DatabasePool:
         """
         if self._db is None:
             raise RuntimeError("MongoDB is not connected")
-        return _ProtectedCollection(self._db[name], self.circuit_breaker)
+        return ProtectedCollection(self._db[name], self.circuit_breaker)
 
     def ping(self) -> bool:
         """Probe MongoDB connectivity directly, bypassing the circuit breaker.

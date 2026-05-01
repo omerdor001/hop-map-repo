@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.db_circuit_breaker import (
     DatabaseCircuitBreaker,
     DatabaseCircuitOpenError,
-    _ProtectedCollection,
+    ProtectedCollection,
     _State,
 )
 
@@ -307,7 +307,7 @@ class TestTrippingErrorClassification:
     ])
     def test_connectivity_error_trips_circuit(self, mock_collection, breaker, exc_class):
         mock_collection.find_one.side_effect = exc_class("server down")
-        proxy = _ProtectedCollection(mock_collection, breaker)
+        proxy = ProtectedCollection(mock_collection, breaker)
         with pytest.raises(exc_class):
             proxy.find_one({})
         assert breaker._failures == 1
@@ -320,7 +320,7 @@ class TestTrippingErrorClassification:
     ])
     def test_non_connectivity_error_does_not_trip_circuit(self, mock_collection, breaker, exc_class):
         mock_collection.find_one.side_effect = exc_class("app error")
-        proxy = _ProtectedCollection(mock_collection, breaker)
+        proxy = ProtectedCollection(mock_collection, breaker)
         with pytest.raises(exc_class):
             proxy.find_one({})
         assert breaker._failures == 0
@@ -338,23 +338,23 @@ class TestProtectedCollection:
 
     def test_forwards_return_value(self, mock_collection, breaker):
         mock_collection.find_one.return_value = {"_id": "abc", "name": "test"}
-        proxy = _ProtectedCollection(mock_collection, breaker)
+        proxy = ProtectedCollection(mock_collection, breaker)
         assert proxy.find_one({"_id": "abc"}) == {"_id": "abc", "name": "test"}
 
     def test_forwards_args_and_kwargs(self, mock_collection, breaker):
-        proxy = _ProtectedCollection(mock_collection, breaker)
+        proxy = ProtectedCollection(mock_collection, breaker)
         proxy.find_one({"x": 1}, projection={"y": 0})
         mock_collection.find_one.assert_called_once_with({"x": 1}, projection={"y": 0})
 
     def test_non_callable_attribute_bypasses_breaker(self, mock_collection, breaker):
         """Collection.name is a non-callable — must be returned directly, no guard() call."""
-        proxy = _ProtectedCollection(mock_collection, breaker)
+        proxy = ProtectedCollection(mock_collection, breaker)
         assert proxy.name == "test_collection"
 
     def test_raises_and_does_not_call_underlying_when_circuit_open(self, mock_collection, breaker):
         breaker._state     = _State.OPEN
         breaker._opened_at = time.monotonic()
-        proxy = _ProtectedCollection(mock_collection, breaker)
+        proxy = ProtectedCollection(mock_collection, breaker)
         with pytest.raises(DatabaseCircuitOpenError):
             proxy.find_one({})
         mock_collection.find_one.assert_not_called()
@@ -362,14 +362,14 @@ class TestProtectedCollection:
     def test_records_success_after_clean_call(self, mock_collection, breaker):
         breaker._failures = 2  # below threshold — success must reset this
         mock_collection.find_one.return_value = None
-        proxy = _ProtectedCollection(mock_collection, breaker)
+        proxy = ProtectedCollection(mock_collection, breaker)
         proxy.find_one({})
         assert breaker._failures == 0
         assert breaker._state    is _State.CLOSED
 
     def test_opens_circuit_after_threshold_connectivity_failures(self, mock_collection, breaker):
         mock_collection.find_one.side_effect = ConnectionFailure("timeout")
-        proxy = _ProtectedCollection(mock_collection, breaker)
+        proxy = ProtectedCollection(mock_collection, breaker)
         for _ in range(breaker._threshold):
             with pytest.raises(ConnectionFailure):
                 proxy.find_one({})
@@ -381,7 +381,7 @@ class TestProtectedCollection:
 
         # Open the circuit through the proxy.
         mock_collection.find_one.side_effect = ConnectionFailure("down")
-        proxy = _ProtectedCollection(mock_collection, cb)
+        proxy = ProtectedCollection(mock_collection, cb)
         with pytest.raises(ConnectionFailure):
             proxy.find_one({})
         assert cb._state is _State.OPEN

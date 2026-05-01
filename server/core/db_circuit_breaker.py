@@ -148,7 +148,7 @@ class DatabaseCircuitBreaker:
                 )
 
 
-class _ProtectedCollection:
+class ProtectedCollection:
     """Transparent proxy around a PyMongo Collection that enforces circuit-breaker rules.
 
     Every callable attribute (find_one, insert_one, update_one, …) is wrapped:

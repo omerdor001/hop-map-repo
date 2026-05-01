@@ -39,6 +39,7 @@ def db_mod():
     import children.repository as child_repo
     import events.repository as event_repo
     import notifications.repository as notif_repo
+    import telegram.repository as tg_repo
     import words.repository as words_repo
 
     try:
@@ -46,6 +47,7 @@ def db_mod():
         child_repo.initialize_indexes()
         event_repo.initialize_indexes()
         notif_repo.initialize_indexes()
+        tg_repo.initialize_indexes()
         words_repo.initialize_indexes()
     except Exception:
         pass
@@ -78,6 +80,9 @@ def db_mod():
         insert_notification   = staticmethod(notif_repo.insert_notification)
         get_notifications     = staticmethod(notif_repo.get_notifications)
         mark_notification_read = staticmethod(notif_repo.mark_notification_read)
+        # telegram link tokens
+        upsert_link_token     = staticmethod(tg_repo.upsert_link_token)
+        consume_link_token    = staticmethod(tg_repo.consume_link_token)
 
         @staticmethod
         def _col_events():
@@ -112,6 +117,11 @@ def db_mod():
             return pool.get_collection("notifications")
 
         @staticmethod
+        def _col_telegram_tokens():
+            from core.database import pool
+            return pool.get_collection("telegram_link_tokens")
+
+        @staticmethod
         def ping():
             from core.database import pool
             return pool.ping()
@@ -133,6 +143,7 @@ def clean_collections(db_mod):
         db_mod._col_users(),
         db_mod._col_sessions(),
         db_mod._col_notifications(),
+        db_mod._col_telegram_tokens(),
     ):
         col.delete_many({})
     yield
@@ -575,3 +586,33 @@ class TestSeedWordsFromExcel:
         db_mod.seed_words_from_excel(str(xlsx_path))
         db_mod.seed_words_from_excel(str(xlsx_path))
         assert list(db_mod.get_blocked_words()).count("unique1") == 1
+
+
+# ---------------------------------------------------------------------------
+# Telegram link tokens
+# ---------------------------------------------------------------------------
+
+class TestTelegramLinkTokens:
+
+    def test_consume_returns_user_id_for_valid_token(self, db_mod):
+        expires = _future(days=1)
+        db_mod.upsert_link_token("user-abc", "hash-valid", expires)
+        assert db_mod.consume_link_token("hash-valid") == "user-abc"
+
+    def test_consume_returns_none_for_unknown_hash(self, db_mod):
+        assert db_mod.consume_link_token("nonexistent-hash") is None
+
+    def test_consume_returns_none_for_expired_token(self, db_mod):
+        db_mod.upsert_link_token("user-abc", "hash-exp", _past())
+        assert db_mod.consume_link_token("hash-exp") is None
+
+    def test_consume_is_single_use(self, db_mod):
+        db_mod.upsert_link_token("user-abc", "hash-once", _future(days=1))
+        assert db_mod.consume_link_token("hash-once") == "user-abc"
+        assert db_mod.consume_link_token("hash-once") is None
+
+    def test_upsert_overwrites_previous_token_for_same_user(self, db_mod):
+        db_mod.upsert_link_token("user-abc", "hash-old", _future(days=1))
+        db_mod.upsert_link_token("user-abc", "hash-new", _future(days=1))
+        assert db_mod.consume_link_token("hash-old") is None
+        assert db_mod.consume_link_token("hash-new") == "user-abc"

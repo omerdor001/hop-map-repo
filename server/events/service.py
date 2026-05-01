@@ -1,3 +1,16 @@
+"""In-process SSE fan-out for the parent dashboard.
+
+Architectural constraint — single-worker only:
+  _sse_queues maps child_id → {asyncio.Queue, ...}.  Each queue belongs to
+  one open SSE connection in *this* process.  With uvicorn --workers N, every
+  process has its own independent copy of this dict.  A hop event that arrives
+  via POST to worker A is broadcast only to worker A's SSE clients — clients
+  connected to other workers receive nothing.
+
+  The startup validator (core/startup.py _check_multi_worker) prevents the
+  server from starting with workers > 1 unless a Redis URL is configured.
+  Until Redis pub/sub is wired in, this module is safe only under workers=1.
+"""
 import asyncio
 
 _sse_queues: dict[str, set[asyncio.Queue]] = {}

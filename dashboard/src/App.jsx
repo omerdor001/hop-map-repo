@@ -6,6 +6,7 @@ import Homepage from "./components/Homepage"
 import Kids from "./components/Kids"
 import Login from "./components/Login"
 import Plan from "./components/Plan"
+import Settings from "./components/Settings"
 
 function Dashboard() {
   const { authFetch, loading: authLoading } = useAuth()
@@ -32,6 +33,7 @@ function Dashboard() {
           <Route path="/" element={<Homepage childList={childList} activeId={activeId} setActiveId={setActiveId} />} />
           <Route path="/kids" element={<Kids setChildList={setChildList} />} />
           <Route path="/plan" element={<Plan />} />
+          <Route path="/settings" element={<Settings />} />
         </Routes>
       </div>
     </div>

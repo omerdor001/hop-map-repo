@@ -15,7 +15,9 @@ Responsibilities are split across feature packages:
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -39,6 +41,7 @@ from health.router import record_startup, router as health_router
 from me.router import router as me_router
 from notifications.router import router as notifications_router
 from platforms.router import router as platforms_router
+from telegram.router import router as telegram_router
 from words.router import router as words_router
 
 # Services that need lifecycle management
@@ -53,12 +56,60 @@ from children.repository import initialize_indexes as children_indexes
 from events.repository import initialize_indexes as events_indexes
 from notifications.repository import initialize_indexes as notifications_indexes
 from words.repository import initialize_indexes as words_indexes
+from telegram.repository import initialize_indexes as telegram_indexes
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
 )
 log = logging.getLogger("hopmap-server")
+
+_ENV_FILE = Path(__file__).parent / ".env"
+_ENV_TEMPLATE = """\
+# HopMap Server — secrets and optional integrations
+# Full config lives in server_config.json; only secrets belong here.
+
+# MongoDB connection URI
+# Local:      mongodb://localhost:27017
+# Atlas:      mongodb+srv://<user>:<password>@<cluster>.mongodb.net/hopmap
+HOPMAP_SERVER__DB__MONGO_URI=mongodb://localhost:27017
+
+# JWT signing secret — required in production (min 32 chars recommended)
+# HOPMAP_SERVER__AUTH__JWT_SECRET=
+
+# Telegram bot notifications (optional — leave blank to disable)
+# 1. Create a bot at t.me/BotFather
+# 2. Set the three values below
+# 3. Register the webhook once: POST https://api.telegram.org/bot<TOKEN>/setWebhook
+#    with {"url":"https://your-server/api/telegram/webhook","secret_token":"<WEBHOOK_SECRET>"}
+HOPMAP_SERVER__TELEGRAM__BOT_TOKEN=
+HOPMAP_SERVER__TELEGRAM__BOT_USERNAME=
+HOPMAP_SERVER__TELEGRAM__WEBHOOK_SECRET=
+
+# Multi-worker / Redis (optional — leave blank for single-process deployments)
+# Required when network.workers > 1.  Shared storage for rate-limit counters.
+# Install the Redis extra first:  pip install 'limits[redis]'
+# HOPMAP_SERVER__REDIS__URL=redis://localhost:6379
+# HOPMAP_SERVER__NETWORK__WORKERS=1
+"""
+
+
+def _ensure_env_file() -> None:
+    # PYTEST_CURRENT_TEST is set automatically by pytest for every test — skip
+    # file creation during test runs to avoid filesystem side effects.
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
+    try:
+        with open(_ENV_FILE, "x", encoding="utf-8") as f:
+            f.write(_ENV_TEMPLATE)
+        log.info(
+            ".env created at %s — fill in credentials and restart the server for changes to take effect.",
+            _ENV_FILE,
+        )
+    except FileExistsError:
+        pass  # already exists — normal case
+    except OSError as exc:
+        log.warning("Could not create .env file: %s", exc)
 
 
 async def _on_db_circuit_open(request: Request, exc: DatabaseCircuitOpenError) -> JSONResponse:
@@ -98,6 +149,7 @@ async def _on_rate_limit_exceeded(request: Request, exc: RateLimitExceeded) -> J
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _ensure_env_file()
     validate_secrets(config_manager)
     log.info("HopMap server starting.")
 
@@ -113,6 +165,7 @@ async def lifespan(app: FastAPI):
     events_indexes()
     notifications_indexes()
     words_indexes()
+    telegram_indexes()
 
     # Seed + load blocked words, start background refresh
     words_service.seed_if_empty(config_manager.data.words_db_path)
@@ -159,6 +212,7 @@ app.include_router(me_router)
 app.include_router(notifications_router)
 app.include_router(platforms_router)
 app.include_router(words_router)
+app.include_router(telegram_router)
 
 
 if __name__ == "__main__":
@@ -172,6 +226,7 @@ if __name__ == "__main__":
             "server:app",
             host=config_manager.network.host,
             port=config_manager.network.port,
+            workers=config_manager.network.workers,
             reload=False,
             timeout_graceful_shutdown=2,
         )

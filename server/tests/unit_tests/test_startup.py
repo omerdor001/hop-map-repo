@@ -27,7 +27,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.startup import (
     _DEFAULT_JWT_SECRET,
     _JWT_SECRET_MIN_LEN,
+    _REDIS_URL_ENV_VAR,
     _check_jwt_secret,
+    _check_multi_worker,
     validate_secrets,
 )
 
@@ -36,10 +38,18 @@ from core.startup import (
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def _cfg(secret: str, environment: str) -> SimpleNamespace:
+def _cfg(
+    secret: str,
+    environment: str,
+    *,
+    workers: int = 1,
+    redis_url: str = "",
+) -> SimpleNamespace:
     """Minimal config stub accepted by validate_secrets."""
     return SimpleNamespace(
         auth=SimpleNamespace(jwt_secret=secret),
+        network=SimpleNamespace(workers=workers),
+        redis=SimpleNamespace(url=redis_url),
         environment=environment,
     )
 
@@ -158,6 +168,26 @@ class TestValidateSecretsDevelopment:
         mock_log.critical.assert_not_called()
         mock_log.error.assert_not_called()
 
+    def test_multi_worker_no_redis_logs_warning(self):
+        """Multi-worker violation must surface through validate_secrets in development."""
+        with patch("core.startup.log") as mock_log:
+            validate_secrets(_cfg(_VALID_SECRET, "development", workers=2))
+        assert mock_log.warning.called
+        mock_log.critical.assert_not_called()
+
+    def test_multi_worker_no_redis_does_not_exit(self):
+        with patch("core.startup.log"), patch("sys.exit") as mock_exit:
+            validate_secrets(_cfg(_VALID_SECRET, "development", workers=2))
+        mock_exit.assert_not_called()
+
+    def test_multi_worker_with_redis_is_clean(self):
+        with patch("core.startup.log") as mock_log, patch("sys.exit") as mock_exit:
+            validate_secrets(
+                _cfg(_VALID_SECRET, "development", workers=4, redis_url="redis://localhost:6379")
+            )
+        mock_log.warning.assert_not_called()
+        mock_exit.assert_not_called()
+
 
 # =============================================================================
 # validate_secrets — production / staging: fatal
@@ -213,3 +243,76 @@ class TestValidateSecretsProduction:
             validate_secrets(_cfg(_DEFAULT_JWT_SECRET, "production"))
         mock_exit.assert_called_with(1)
         assert mock_exit.call_args != call(0)
+
+    @pytest.mark.parametrize("env", ["production", "staging"])
+    def test_multi_worker_no_redis_exits_1(self, env):
+        """Multi-worker violation must surface through validate_secrets in production/staging."""
+        with patch("core.startup.log"), patch("sys.exit") as mock_exit:
+            validate_secrets(_cfg(_VALID_SECRET, env, workers=2))
+        mock_exit.assert_called_once_with(1)
+
+    @pytest.mark.parametrize("env", ["production", "staging"])
+    def test_multi_worker_with_redis_does_not_exit(self, env):
+        with patch("sys.exit") as mock_exit:
+            validate_secrets(
+                _cfg(_VALID_SECRET, env, workers=4, redis_url="redis://localhost:6379")
+            )
+        mock_exit.assert_not_called()
+
+    def test_two_violations_exit_called_exactly_once(self):
+        """JWT violation + multi-worker violation must still exit exactly once, not twice."""
+        with patch("core.startup.log"), patch("sys.exit") as mock_exit:
+            validate_secrets(_cfg(_DEFAULT_JWT_SECRET, "production", workers=2))
+        assert mock_exit.call_count == 1
+
+
+# =============================================================================
+# _check_multi_worker — pure function, no mocks
+# =============================================================================
+
+def _mw_cfg(workers: int, redis_url: str = "") -> SimpleNamespace:
+    """Minimal stub for _check_multi_worker."""
+    return SimpleNamespace(
+        network=SimpleNamespace(workers=workers),
+        redis=SimpleNamespace(url=redis_url),
+    )
+
+
+@pytest.mark.unit
+class TestCheckMultiWorker:
+    """_check_multi_worker must return a violation only when workers > 1
+    and no Redis URL is configured."""
+
+    # --- safe configurations (no violation) ---
+
+    def test_single_worker_no_redis_returns_no_violations(self):
+        assert _check_multi_worker(_mw_cfg(workers=1)) == []
+
+    def test_single_worker_with_redis_returns_no_violations(self):
+        assert _check_multi_worker(_mw_cfg(workers=1, redis_url="redis://localhost:6379")) == []
+
+    def test_multi_worker_with_redis_returns_no_violations(self):
+        assert _check_multi_worker(_mw_cfg(workers=4, redis_url="redis://localhost:6379")) == []
+
+    def test_two_workers_with_redis_returns_no_violations(self):
+        assert _check_multi_worker(_mw_cfg(workers=2, redis_url="redis://localhost:6379")) == []
+
+    # --- violation cases ---
+
+    def test_two_workers_without_redis_returns_one_violation(self):
+        assert len(_check_multi_worker(_mw_cfg(workers=2))) == 1
+
+    def test_many_workers_without_redis_returns_one_violation(self):
+        assert len(_check_multi_worker(_mw_cfg(workers=8))) == 1
+
+    def test_violation_names_the_worker_count(self):
+        (msg,) = _check_multi_worker(_mw_cfg(workers=4))
+        assert "4" in msg
+
+    def test_violation_names_the_redis_env_var(self):
+        (msg,) = _check_multi_worker(_mw_cfg(workers=2))
+        assert _REDIS_URL_ENV_VAR in msg
+
+    def test_violation_mentions_single_worker_alternative(self):
+        (msg,) = _check_multi_worker(_mw_cfg(workers=2))
+        assert "workers=1" in msg
