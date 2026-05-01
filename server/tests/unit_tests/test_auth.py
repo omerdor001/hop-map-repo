@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
-from jose import jwt
+from jose import JWTError, jwt
 
 _SERVER_DIR = Path(__file__).resolve().parent.parent.parent
 if str(_SERVER_DIR) not in sys.path:
@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from config import config_manager
 from auth.schemas import RegisterRequest
 from auth.security import (
+    TokenDecodeError,
     create_access_token,
     create_refresh_token,
     decode_access_token,
@@ -89,42 +90,44 @@ class TestAccessToken:
         token = create_access_token("uid-abc", "a@b.com")
         assert decode_access_token(token)["email"] == "a@b.com"
 
-    def test_decode_raises_401_for_garbage_string(self):
-        with pytest.raises(HTTPException) as exc:
+    def test_decode_raises_for_garbage_string(self):
+        with pytest.raises(TokenDecodeError):
             decode_access_token("not.a.jwt")
-        assert exc.value.status_code == 401
 
-    def test_decode_raises_401_for_empty_string(self):
-        with pytest.raises(HTTPException) as exc:
+    def test_decode_raises_for_empty_string(self):
+        with pytest.raises(TokenDecodeError):
             decode_access_token("")
-        assert exc.value.status_code == 401
 
-    def test_decode_raises_401_for_tampered_signature(self):
+    def test_decode_raises_for_tampered_signature(self):
         token = create_access_token("u1", "x@y.com")
         tampered = token[:-4] + "XXXX"
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(TokenDecodeError):
             decode_access_token(tampered)
-        assert exc.value.status_code == 401
 
-    def test_decode_raises_401_for_expired_token(self):
+    def test_decode_raises_for_expired_token(self):
         payload = {
             "sub": "u1", "email": "x@y.com",
             "exp": datetime.now(timezone.utc) - timedelta(seconds=1),
         }
         expired = jwt.encode(payload, _AUTH_CFG.jwt_secret, algorithm=_AUTH_CFG.jwt_algorithm)
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(TokenDecodeError):
             decode_access_token(expired)
-        assert exc.value.status_code == 401
 
-    def test_decode_raises_401_for_wrong_secret(self):
+    def test_decode_raises_for_wrong_secret(self):
         payload = {
             "sub": "u1", "email": "x@y.com",
             "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
         }
         token = jwt.encode(payload, "wrong-secret", algorithm="HS256")
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(TokenDecodeError):
             decode_access_token(token)
-        assert exc.value.status_code == 401
+
+    def test_decode_error_chains_original_jwt_error(self):
+        # `raise TokenDecodeError(...) from exc` must preserve the original
+        # JWTError as __cause__ so that logging/debugging can inspect the root cause.
+        with pytest.raises(TokenDecodeError) as exc_info:
+            decode_access_token("not.a.valid.jwt")
+        assert isinstance(exc_info.value.__cause__, JWTError)
 
     def test_tokens_for_different_users_differ(self):
         assert create_access_token("u1", "a@b.com") != create_access_token("u2", "a@b.com")
@@ -184,40 +187,48 @@ class TestHashToken:
 
 class TestGetCurrentUser:
 
-    async def test_valid_token_existing_user_returns_user(self):
+    def test_valid_token_existing_user_returns_user(self):
         token = create_access_token("uid-1", "x@y.com")
         fake_user = {"id": "uid-1", "email": "x@y.com"}
         with patch("auth.dependencies.get_user_by_id", return_value=fake_user):
-            result = await get_current_user(token=token)
+            result = get_current_user(token=token)
         assert result == fake_user
 
-    async def test_valid_token_user_not_found_raises_401(self):
+    def test_valid_token_user_not_found_raises_401(self):
         token = create_access_token("uid-gone", "gone@x.com")
         with patch("auth.dependencies.get_user_by_id", return_value=None):
             with pytest.raises(HTTPException) as exc:
-                await get_current_user(token=token)
+                get_current_user(token=token)
         assert exc.value.status_code == 401
 
-    async def test_invalid_token_raises_401(self):
+    def test_invalid_token_raises_401(self):
         with pytest.raises(HTTPException) as exc:
-            await get_current_user(token="garbage.token.value")
+            get_current_user(token="garbage.token.value")
         assert exc.value.status_code == 401
 
-    async def test_token_without_sub_raises_401(self):
+    def test_token_without_sub_raises_401(self):
         payload = {
             "email": "x@y.com",
             "exp": datetime.now(timezone.utc) + timedelta(minutes=15),
         }
         token = jwt.encode(payload, _AUTH_CFG.jwt_secret, algorithm=_AUTH_CFG.jwt_algorithm)
         with pytest.raises(HTTPException) as exc:
-            await get_current_user(token=token)
+            get_current_user(token=token)
         assert exc.value.status_code == 401
 
-    async def test_db_is_called_with_sub_from_token(self):
+    def test_db_is_called_with_sub_from_token(self):
         token = create_access_token("uid-check", "test@test.com")
         with patch("auth.dependencies.get_user_by_id", return_value={"id": "uid-check"}) as mock_get:
-            await get_current_user(token=token)
+            get_current_user(token=token)
         mock_get.assert_called_once_with("uid-check")
+
+    def test_token_decode_error_is_translated_to_401(self):
+        # Isolates the translation layer: regardless of why decode_access_token
+        # fails, get_current_user must always convert TokenDecodeError → HTTP 401.
+        with patch("auth.dependencies.decode_access_token", side_effect=TokenDecodeError("bad")):
+            with pytest.raises(HTTPException) as exc_info:
+                get_current_user(token="any.token.value")
+        assert exc_info.value.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -231,43 +242,43 @@ class TestGetAgentChild:
         req.headers = {"Authorization": auth_header} if auth_header else {}
         return req
 
-    async def test_valid_bearer_token_returns_child(self):
+    def test_valid_bearer_token_returns_child(self):
         raw, _ = create_refresh_token()
         fake_child = {"childId": "child-1", "parentId": "parent-1"}
         with patch("auth.dependencies.get_child_by_agent_token", return_value=fake_child):
-            result = await get_agent_child(request=self._make_request(f"Bearer {raw}"))
+            result = get_agent_child(request=self._make_request(f"Bearer {raw}"))
         assert result == fake_child
 
-    async def test_missing_authorization_header_raises_401(self):
+    def test_missing_authorization_header_raises_401(self):
         with pytest.raises(HTTPException) as exc:
-            await get_agent_child(request=self._make_request(None))
+            get_agent_child(request=self._make_request(None))
         assert exc.value.status_code == 401
 
-    async def test_non_bearer_scheme_raises_401(self):
+    def test_non_bearer_scheme_raises_401(self):
         with pytest.raises(HTTPException) as exc:
-            await get_agent_child(request=self._make_request("Basic dXNlcjpwYXNz"))
+            get_agent_child(request=self._make_request("Basic dXNlcjpwYXNz"))
         assert exc.value.status_code == 401
 
-    async def test_unknown_token_raises_401(self):
+    def test_unknown_token_raises_401(self):
         with patch("auth.dependencies.get_child_by_agent_token", return_value=None):
             with pytest.raises(HTTPException) as exc:
-                await get_agent_child(request=self._make_request("Bearer unknowntoken"))
+                get_agent_child(request=self._make_request("Bearer unknowntoken"))
         assert exc.value.status_code == 401
 
-    async def test_raw_token_is_hashed_before_db_lookup(self):
+    def test_raw_token_is_hashed_before_db_lookup(self):
         raw = "rawtoken-abc-123"
         expected_hash = hash_token(raw)
         with patch("auth.dependencies.get_child_by_agent_token", return_value=None) as mock_lookup:
             with pytest.raises(HTTPException):
-                await get_agent_child(request=self._make_request(f"Bearer {raw}"))
+                get_agent_child(request=self._make_request(f"Bearer {raw}"))
         mock_lookup.assert_called_once_with(expected_hash)
 
-    async def test_whitespace_stripped_from_bearer_token(self):
+    def test_whitespace_stripped_from_bearer_token(self):
         raw = "cleantoken"
         expected_hash = hash_token(raw)
         with patch("auth.dependencies.get_child_by_agent_token", return_value=None) as mock_lookup:
             with pytest.raises(HTTPException):
-                await get_agent_child(request=self._make_request(f"Bearer   {raw}   "))
+                get_agent_child(request=self._make_request(f"Bearer   {raw}   "))
         mock_lookup.assert_called_once_with(expected_hash)
 
 

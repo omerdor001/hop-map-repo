@@ -2,14 +2,13 @@
 
 A single Limiter is created here and imported by every router that needs it,
 the same pattern as core/database.py for the MongoDB pool.  This keeps the
-storage backend in one place: swap MemoryStorage for RedisStorage here and
-every decorated endpoint picks it up automatically.
+storage backend in one place: set HOPMAP_SERVER__REDIS__URL and every
+decorated endpoint picks up Redis storage automatically.
 
 Storage backend:
-  MemoryStorage  — default, suitable for a single-process deployment.
-  RedisStorage   — drop-in replacement for multi-process / multi-instance.
-                   To migrate: pip install limits[redis] and replace the
-                   storage_uri below with "redis://host:6379".
+  MemoryStorage  — default when redis.url is empty; suitable for single-process.
+  RedisStorage   — used automatically when redis.url is set; safe for multi-worker.
+                   Requires: pip install 'limits[redis]'
 
 Key function:
   get_remote_address returns request.client.host (the direct TCP peer).
@@ -23,9 +22,12 @@ from __future__ import annotations
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from config import config_manager
+
+# Use Redis when configured; fall back to in-process MemoryStorage for
+# single-worker deployments.  The startup validator (core/startup.py) ensures
+# the server refuses to start with workers > 1 and no Redis URL configured.
 limiter = Limiter(
     key_func=get_remote_address,
-    # MemoryStorage is the default; named explicitly so a future Redis
-    # migration is a one-line change here rather than a library-level hunt.
-    storage_uri="memory://",
+    storage_uri=config_manager.redis.url or "memory://",
 )

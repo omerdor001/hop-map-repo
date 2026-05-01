@@ -23,7 +23,7 @@ def create_user(email: str, password_hash: str, display_name: str) -> str:
         "displayName": display_name,
         "emailVerified": False,
         "maxChildren": 0,
-        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "createdAt": datetime.now(timezone.utc),
         "deletedAt": None,
     })
     return str(result.inserted_id)
@@ -33,6 +33,8 @@ def get_user_by_email(email: str) -> dict | None:
     doc = _col_users().find_one({"email": email.lower().strip(), "deletedAt": None})
     if doc:
         doc["id"] = str(doc.pop("_id"))
+        if isinstance(doc.get("createdAt"), datetime):
+            doc["createdAt"] = doc["createdAt"].isoformat()
     return doc
 
 
@@ -43,6 +45,8 @@ def get_user_by_id(user_id: str) -> dict | None:
         return None
     if doc:
         doc["id"] = str(doc.pop("_id"))
+        if isinstance(doc.get("createdAt"), datetime):
+            doc["createdAt"] = doc["createdAt"].isoformat()
     return doc
 
 
@@ -77,6 +81,16 @@ def update_max_children(user_id: str, max_children: int) -> None:
         _col_users().update_one(
             {"_id": ObjectId(user_id)},
             {"$set": {"maxChildren": max_children}},
+        )
+    except InvalidId:
+        pass
+
+
+def update_telegram_chat_id(user_id: str, chat_id: str | None) -> None:
+    try:
+        _col_users().update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"telegramChatId": chat_id}},
         )
     except InvalidId:
         pass

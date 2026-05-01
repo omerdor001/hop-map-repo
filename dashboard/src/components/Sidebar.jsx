@@ -7,8 +7,9 @@ const sideNav = [
     { icon: "🗺️", label: "Live Map", path: "/" },
   ]},
   { section: "ACCOUNT", items: [
-    { icon: "👦", label: "Kids",  path: "/kids"  },
-    { icon: "💳", label: "Plan",  path: "/plan"  },
+    { icon: "👦", label: "Kids",     path: "/kids"     },
+    { icon: "💳", label: "Plan",     path: "/plan"     },
+    { icon: "⚙️", label: "Settings", path: "/settings" },
   ]},
 ]
 

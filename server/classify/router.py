@@ -1,3 +1,4 @@
+import asyncio
 import io
 import logging
 import pathlib
@@ -10,7 +11,7 @@ from fastapi.responses import Response
 
 from auth.dependencies import get_agent_child, get_current_user
 from auth.security import hash_token
-from agent_installer.generator import build_installer, build_uninstaller, build_readme, _AGENT_FILES, _SETUP_CODE_TTL_HOURS as _INSTALLER_TTL_HOURS
+from agent_installer.generator import AGENT_FILES, SETUP_CODE_TTL_HOURS, build_installer, build_readme, build_uninstaller
 from children.repository import (
     get_child_by_id,
     get_child_by_setup_code_hash,
@@ -33,16 +34,21 @@ from classify.schemas import (
     ClassifyResponse,
     HopEventRequest,
 )
+from core.schemas import OkResponse
 from core.validators import validate_child_id
 from events import repository as event_repo
 from events import service as event_service
 from notifications import repository as notif_repo
+from notifications import service as notification_service
 from words.service import check_blocked_words
 
 log = logging.getLogger(__name__)
 
 # Root of the agent source directory, two levels up from this file (server/).
 _AGENT_DIR = pathlib.Path(__file__).parent.parent.parent / "agent"
+
+# Strong references to fire-and-forget tasks — prevents GC before completion.
+_background_tasks: set[asyncio.Task] = set()
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -60,10 +66,10 @@ async def agent_me(agent_child: dict = Depends(get_agent_child)) -> AgentMeRespo
 def agent_file(filename: str) -> Response:
     """Serve a whitelisted agent source file for the installer to download.
 
-    Only files explicitly listed in ``_AGENT_FILES`` are served — any other
+    Only files explicitly listed in ``AGENT_FILES`` are served — any other
     name returns 404, blocking path-traversal attempts entirely.
     """
-    if filename not in _AGENT_FILES:
+    if filename not in AGENT_FILES:
         raise HTTPException(status_code=404, detail="File not found.")
 
     file_path = _AGENT_DIR / filename
@@ -98,7 +104,7 @@ def agent_installer(
         raise HTTPException(status_code=404, detail="Child not found.")
 
     setup_code = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=_INSTALLER_TTL_HOURS)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=SETUP_CODE_TTL_HOURS)
     upsert_setup_code(child_id, hash_token(setup_code), expires_at)
 
     child_name = child.get("childName", child_id)
@@ -108,7 +114,7 @@ def agent_installer(
 
     installer  = build_installer(backend_url=backend_url.rstrip("/"), setup_code=setup_code, child_name=child_name)
     uninstaller = build_uninstaller(child_name=child_name)
-    readme      = build_readme(child_name=child_name, ttl_hours=_INSTALLER_TTL_HOURS)
+    readme      = build_readme(child_name=child_name, ttl_hours=SETUP_CODE_TTL_HOURS)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -137,17 +143,6 @@ def agent_activate(body: ActivateAgentRequest) -> ActivateAgentResponse:
     child = get_child_by_setup_code_hash(code_hash)
 
     if child is None:
-        raise HTTPException(status_code=400, detail="Invalid or expired setup code.")
-
-    expires_at_raw = child.get("setupCodeExpiresAt", "")
-    try:
-        expires_at = datetime.fromisoformat(expires_at_raw)
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=400, detail="Invalid or expired setup code.")
-
-    if datetime.now(timezone.utc) >= expires_at:
         raise HTTPException(status_code=400, detail="Invalid or expired setup code.")
 
     new_token = secrets.token_hex(32)
@@ -206,8 +201,8 @@ async def agent_classify(body: ClassifyRequest, _child: dict = Depends(get_agent
     return ClassifyResponse(**result)
 
 
-@router.post("/hop/{child_id}")
-async def agent_hop(child_id: str, body: HopEventRequest, agent_child: dict = Depends(get_agent_child)) -> dict:
+@router.post("/hop/{child_id}", response_model=OkResponse)
+async def agent_hop(child_id: str, body: HopEventRequest, agent_child: dict = Depends(get_agent_child)) -> OkResponse:
     validate_child_id(child_id)
     if agent_child["childId"] != child_id:
         raise HTTPException(status_code=403, detail="Token does not match child.")
@@ -237,6 +232,16 @@ async def agent_hop(child_id: str, body: HopEventRequest, agent_child: dict = De
             notif_type="hop_detected",
             message=f"{agent_child.get('childName', child_id)} hopped to {body.confirmed_to or body.to_app}",
         )
+        task = asyncio.create_task(
+            notification_service.dispatch_hop(
+                parent_id=agent_child["parentId"],
+                child_name=agent_child.get("childName", child_id),
+                to_app=body.confirmed_to or body.to_app,
+            ),
+            name="telegram-hop-notify",
+        )
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
     await event_service.broadcast(child_id, {"type": "event", **event})
 
     log.info(
@@ -244,4 +249,4 @@ async def agent_hop(child_id: str, body: HopEventRequest, agent_child: dict = De
         event["from"], event["to"], event["fromTitle"], event["toTitle"],
         alert_reason or "none",
     )
-    return {"ok": True}
+    return OkResponse()

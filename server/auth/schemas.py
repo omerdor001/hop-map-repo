@@ -31,3 +31,20 @@ class RegisterRequest(BaseModel):
         if missing:
             raise ValueError(f"Password must contain at least {', '.join(missing)}.")
         return v
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    displayName: str = ""
+    createdAt: str = ""
+
+
+class AuthResponse(BaseModel):
+    accessToken: str
+    tokenType: str = "bearer"
+    user: UserResponse
+
+
+class AccessTokenResponse(BaseModel):
+    accessToken: str

@@ -15,7 +15,7 @@ def register_child(child_id: str, child_name: str, parent_id: str, agent_token_h
             "parentId": parent_id,
             "agentTokenHash": agent_token_hash,
             "agentTokenPrefix": agent_token_prefix,
-            "registeredAt": datetime.now(timezone.utc).isoformat(),
+            "registeredAt": datetime.now(timezone.utc),
         }},
         upsert=True,
     )
@@ -61,16 +61,19 @@ def upsert_setup_code(child_id: str, code_hash: str, expires_at: datetime) -> No
         {"childId": child_id},
         {"$set": {
             "setupCodeHash": code_hash,
-            "setupCodeExpiresAt": expires_at.isoformat(),
+            "setupCodeExpiresAt": expires_at,
         }},
     )
 
 
 def get_child_by_setup_code_hash(code_hash: str) -> dict | None:
-    """Return minimal child data for the given setup-code hash, or None."""
+    """Return child data for a valid (non-expired) setup-code hash, or None."""
     return _col_children().find_one(
-        {"setupCodeHash": code_hash},
-        {"_id": 0, "childId": 1, "childName": 1, "setupCodeExpiresAt": 1},
+        {
+            "setupCodeHash": code_hash,
+            "setupCodeExpiresAt": {"$gt": datetime.now(timezone.utc)},
+        },
+        {"_id": 0, "childId": 1, "childName": 1},
     )
 
 

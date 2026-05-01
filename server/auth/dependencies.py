@@ -6,14 +6,20 @@ dependency injection system. No business logic lives here.
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import OAuth2PasswordBearer
 
 from auth.repository import get_user_by_id
-from auth.security import decode_access_token, hash_token, oauth2_scheme
+from auth.security import TokenDecodeError, decode_access_token, hash_token
 from children.repository import get_child_by_agent_token
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
-    payload = decode_access_token(token)
+
+def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
+    try:
+        payload = decode_access_token(token)
+    except TokenDecodeError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token.")
     user_id: str | None = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload.")
@@ -23,7 +29,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     return user
 
 
-async def get_agent_child(request: Request) -> dict:
+def get_agent_child(request: Request) -> dict:
     """Validate agent Bearer token and return the child document."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):

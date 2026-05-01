@@ -10,13 +10,13 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from fastapi import HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 
 from config import config_manager
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+class TokenDecodeError(ValueError):
+    """Raised by decode_access_token() when the token is invalid or expired."""
 
 
 def hash_password(plain: str) -> str:
@@ -41,8 +41,8 @@ def decode_access_token(token: str) -> dict:
     cfg = config_manager.auth
     try:
         return jwt.decode(token, cfg.jwt_secret, algorithms=[cfg.jwt_algorithm])
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token.")
+    except JWTError as exc:
+        raise TokenDecodeError("Invalid or expired token.") from exc
 
 
 def create_refresh_token() -> tuple[str, str]:
