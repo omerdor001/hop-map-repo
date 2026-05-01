@@ -38,6 +38,9 @@ class NetworkConfig(BaseModel):
     # Comma-separated list of allowed CORS origins, or "*" for all.
     # Example: "http://localhost:5173,https://hopmap.vercel.app"
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    # Number of uvicorn worker processes.  Values > 1 require Redis — see RedisConfig.
+    # Override: HOPMAP_SERVER__NETWORK__WORKERS=4
+    workers: int = Field(1, description="Number of uvicorn worker processes", ge=1)
 
 
 class DatabaseConfig(BaseModel):
@@ -104,6 +107,47 @@ class DataConfig(BaseModel):
     )
 
 
+class TelegramConfig(BaseModel):
+    """Telegram Bot API."""
+
+    # Leave empty to disable — server operates normally without it.
+    # Override: HOPMAP_SERVER__TELEGRAM__BOT_TOKEN=<token>
+    bot_token: str = Field("", description="Bot token from @BotFather")
+    # Override: HOPMAP_SERVER__TELEGRAM__BOT_USERNAME=HopMapBot
+    bot_username: str = Field("", description="Bot username without @, used to build deep-link URLs")
+    # Passed to setWebhook as secret_token; Telegram echoes it in
+    # X-Telegram-Bot-Api-Secret-Token so the webhook can reject spoofed calls.
+    # Override: HOPMAP_SERVER__TELEGRAM__WEBHOOK_SECRET=<random-string>
+    webhook_secret: str = Field("", description="Webhook verification secret")
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.bot_token)
+
+
+class RedisConfig(BaseModel):
+    """Optional Redis connection for multi-worker deployments.
+
+    When ``url`` is set, the server uses Redis-backed storage for:
+      - slowapi auth rate-limit counters (core/rate_limit.py)
+
+    Required when ``network.workers > 1``.  Leave empty for single-process
+    deployments — MemoryStorage is used and the startup validator enforces
+    the single-worker constraint.
+
+    To enable: set HOPMAP_SERVER__REDIS__URL=redis://localhost:6379 and
+    install the Redis extra:  pip install 'limits[redis]'
+    """
+
+    url: str = Field(
+        "",
+        description=(
+            "Redis connection URL (e.g. redis://localhost:6379). "
+            "Required when workers > 1."
+        ),
+    )
+
+
 class ServerConfig(BaseSettings):
     """Root configuration for the HopMap server."""
 
@@ -112,6 +156,8 @@ class ServerConfig(BaseSettings):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     data: DataConfig = Field(default_factory=DataConfig)
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    redis: RedisConfig = Field(default_factory=RedisConfig)
 
     # Maximum classify requests per child per minute.
     classify_max_rpm: int = Field(

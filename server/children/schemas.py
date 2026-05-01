@@ -27,3 +27,25 @@ class RenameChildRequest(BaseModel):
     @classmethod
     def _strip_child_name(cls, v: object) -> object:
         return _strip_str(v)
+
+
+class ChildSummary(BaseModel):
+    childId: str
+    childName: str = ""
+
+
+class ChildListResponse(BaseModel):
+    children: list[ChildSummary]
+
+
+class RegisterChildResponse(BaseModel):
+    ok: bool
+    childId: str
+    childName: str
+    agentToken: str
+
+
+class RenameChildResponse(BaseModel):
+    ok: bool
+    childId: str
+    childName: str

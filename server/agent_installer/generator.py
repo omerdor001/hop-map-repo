@@ -16,10 +16,10 @@ _TESSERACT_URL = (
 _TESSERACT_SHA256 = "C885FFF6998E0608BA4BB8AB51436E1C6775C2BAFC2559A19B423E18678B60C9"
 
 # Agent source files that the installer downloads from the server.
-_AGENT_FILES = ["agent.py", "config.py", "requirements.txt"]
+AGENT_FILES = ["agent.py", "config.py", "requirements.txt"]
 
 # How long a setup code is valid after GET /agent/installer issues it.
-_SETUP_CODE_TTL_HOURS = 1
+SETUP_CODE_TTL_HOURS = 1
 
 _INSTALL_DIR = "C:\\HopMap"
 
@@ -154,7 +154,7 @@ def build_installer(
     file_downloads = "\n".join(
         f'    Invoke-WebRequest -Uri "$BackendUrl/agent/files/{f}" '
         f'-OutFile "$InstallDir\\{f}" -UseBasicParsing'
-        for f in _AGENT_FILES
+        for f in AGENT_FILES
     )
 
     return f"""\
