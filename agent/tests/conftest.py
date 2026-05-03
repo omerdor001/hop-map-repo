@@ -47,6 +47,8 @@ if not hasattr(_ctypes, "windll"):
     _ctypes.windll = MagicMock()
 if not hasattr(_ctypes, "wintypes"):
     _ctypes.wintypes = MagicMock()
+if not hasattr(_ctypes, "WINFUNCTYPE"):
+    _ctypes.WINFUNCTYPE = lambda *a, **kw: (lambda f: f)
 
 for _name, _stub in _STUBS.items():
     sys.modules.setdefault(_name, _stub)

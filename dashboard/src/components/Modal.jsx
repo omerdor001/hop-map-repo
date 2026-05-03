@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
+import styles from "./Modal.module.css"
 
 /**
  * Generic modal portal. Renders `children` inside a full-screen backdrop
@@ -35,7 +36,6 @@ export default function Modal({ open, onClose, children }) {
   useEffect(() => {
     if (!open) return
     const trigger = document.activeElement
-    // Focus the first focusable element inside the panel, or the panel itself
     const focusable = panelRef.current?.querySelector(
       'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
     )
@@ -48,20 +48,14 @@ export default function Modal({ open, onClose, children }) {
   return createPortal(
     <div
       role="presentation"
+      className={styles.backdrop}
       onClick={onClose}
-      style={{
-        position: "fixed", inset: 0, zIndex: 1000,
-        background: "rgba(0,0,0,0.65)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        backdropFilter: "blur(2px)",
-      }}
     >
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         onClick={e => e.stopPropagation()}
-        // Catch Tab to keep focus inside the modal
         onKeyDown={e => {
           if (e.key !== "Tab") return
           const focusable = panelRef.current.querySelectorAll(

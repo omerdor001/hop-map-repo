@@ -419,7 +419,7 @@ def _load_from_registry() -> set[str]:
                 try:
                     with winreg.OpenKey(parent, child_name) as child:
                         value, _ = winreg.QueryValueEx(child, "MatchedExeFullPath")
-                        exes.add(pathlib.Path(value).name.lower())
+                        exes.add(pathlib.PureWindowsPath(value).name.lower())
                 except OSError:
                     continue  # sub-key has no MatchedExeFullPath — skip
     except OSError:

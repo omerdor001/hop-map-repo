@@ -1,0 +1,15 @@
+/*
+ * Shared CSS module classes used by more than one component.
+ * Import with: import shared from '../styles/shared.module.css'
+ */
+
+.liveBadge {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--color-danger);
+  background: rgba(255, 71, 87, 0.13);
+  border: 1px solid rgba(255, 71, 87, 0.28);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+}

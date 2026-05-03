@@ -1,6 +1,74 @@
+/* ── Design tokens ───────────────────────────────────────────────────────── */
+:root {
+  --color-bg:          #0d0f14;
+  --color-surface:     #111318;
+  --color-border:      #1e2130;
+  --color-row-divider: #1a1d28;
+  --color-text:        #e8eaf0;
+  --color-muted:       #4b5268;
+  --color-subtle:      #3a3f58;
+  --color-indigo:      #6366f1;
+  --color-indigo-light:#818cf8;
+  --color-danger:      #ff4757;
+  --color-success:     #2ed573;
+  --color-warning:     #ffa502;
+
+  /* Semantic alpha variants — used by Badge, StatCard, and similar data-driven components */
+  --color-danger-bg:     rgba(255, 71, 87, 0.13);
+  --color-danger-border: rgba(255, 71, 87, 0.2);
+  --color-success-bg:    rgba(46, 213, 115, 0.13);
+  --color-success-border:rgba(46, 213, 115, 0.2);
+  --color-warning-bg:    rgba(255, 165, 2, 0.13);
+  --color-warning-border:rgba(255, 165, 2, 0.2);
+
+  /* Password strength meter — 5 levels from weak to strong */
+  --color-strength-0: #ef4444;
+  --color-strength-1: #f97316;
+  --color-strength-2: #eab308;
+  --color-strength-3: #22c55e;
+  --color-strength-4: #16a34a;
+
+  /* Plan tier accents */
+  --color-plan-free:      var(--color-muted);
+  --color-plan-starter:   var(--color-indigo);
+  --color-plan-family:    #8b5cf6;
+  --color-plan-unlimited: #ec4899;
+
+  --font-sans: 'IBM Plex Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+}
+
 /* ── Box model reset ─────────────────────────────────────────────────────── */
 *, *::before, *::after {
   box-sizing: border-box;
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Allow components to own their heading styles completely */
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: inherit;
+  font-size: inherit;
+}
+
+p { margin: 0; }
+
+/* Buttons and inputs inherit font from body */
+button, input, select, textarea {
+  font: inherit;
 }
 
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
@@ -18,122 +86,4 @@
 @keyframes in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0);   }
-}
-
-/* ── Event row hover ─────────────────────────────────────────────────────── */
-.ev-row:hover {
-  background: rgba(255, 255, 255, 0.03) !important;
-  cursor: pointer;
-}
-
-:root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
-
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
-
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
-body {
-  margin: 0;
-}
-
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
-
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
-
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
 }
