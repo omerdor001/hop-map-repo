@@ -45,7 +45,7 @@ export function AuthProvider({ children }) {
       .then(data => {
         if (data?.accessToken) setToken(data.accessToken)
       })
-      .catch(() => {})
+      .catch(err => console.error("[AuthContext] session restore failed:", err))
       .finally(() => setLoading(false))
   }, [])
 
@@ -96,7 +96,8 @@ export function AuthProvider({ children }) {
   }, [])
 
   const logout = useCallback(async () => {
-    await fetch("/auth/logout", { method: "POST", credentials: "include" }).catch(() => {})
+    await fetch("/auth/logout", { method: "POST", credentials: "include" })
+      .catch(err => console.error("[AuthContext] logout request failed:", err))
     setToken(null)
     setUser(null)
   }, [])
@@ -133,6 +134,7 @@ export function AuthProvider({ children }) {
  * Consume auth context. Throws a clear error when used outside AuthProvider
  * rather than silently returning null.
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext)
   if (ctx === null) {

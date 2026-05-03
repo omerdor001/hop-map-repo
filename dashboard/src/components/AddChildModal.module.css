@@ -1,0 +1,183 @@
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  padding: 36px 32px;
+  width: 440px;
+  box-sizing: border-box;
+}
+
+/* ── Step 1: creation form ───────────────────────────────────────────────── */
+.header       { margin-bottom: 28px; }
+.sectionLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--color-indigo);
+  margin-bottom: 6px;
+}
+
+.heading {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.subheading {
+  margin: 8px 0 0;
+  color: var(--color-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.label {
+  font-size: 12px;
+  color: var(--color-muted);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.required { color: #ef4444; }
+
+.input {
+  width: 100%;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  padding: 10px 14px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.input:focus {
+  border-color: var(--color-indigo);
+}
+
+.errorBox {
+  background: #1f0f0f;
+  border: 1px solid #7f1d1d;
+  border-radius: 6px;
+  padding: 9px 12px;
+  color: #f87171;
+  font-size: 13px;
+}
+
+.formActions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* ── Shared buttons ──────────────────────────────────────────────────────── */
+.btnPrimary {
+  background: var(--color-indigo);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  background: var(--color-indigo-light);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnGhost {
+  background: transparent;
+  color: var(--color-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 14px;
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.btnGhost:hover:not(:disabled) {
+  border-color: var(--color-muted);
+  color: var(--color-text);
+}
+
+.btnGhost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnFlex { flex: 1; }
+
+/* ── Step 2: installer ───────────────────────────────────────────────────── */
+.installerHeader { margin-bottom: 24px; }
+
+.successIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  margin-bottom: 16px;
+}
+
+.stepsSection { margin-bottom: 24px; }
+
+.stepsLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-muted);
+  margin-bottom: 10px;
+  letter-spacing: 0.08em;
+}
+
+.stepItem {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+  align-items: flex-start;
+}
+
+.stepNum {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-indigo-light);
+}
+
+.stepText {
+  font-size: 13px;
+  color: var(--color-muted);
+  line-height: 1.5;
+}
+
+.installerActions {
+  display: flex;
+  gap: 10px;
+}

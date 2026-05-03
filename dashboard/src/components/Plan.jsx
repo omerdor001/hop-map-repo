@@ -1,13 +1,20 @@
 import { useState, useEffect } from "react"
 import { useAuth } from "../context/AuthContext"
-import { colors, fonts } from "../utils/theme"
+import styles from "./Plan.module.css"
 
 const PLANS = [
-  { label: "Free",      maxChildren: 0,  description: "No children — just browsing", color: colors.muted   },
-  { label: "Starter",   maxChildren: 1,  description: "1 child",                     color: colors.indigo  },
-  { label: "Family",    maxChildren: 3,  description: "Up to 3 children",            color: "#8b5cf6"      },
-  { label: "Unlimited", maxChildren: 10, description: "Up to 10 children",           color: "#ec4899"      },
+  { label: "Free",      maxChildren: 0,  description: "No children — just browsing", color: "var(--color-plan-free)"      },
+  { label: "Starter",   maxChildren: 1,  description: "1 child",                     color: "var(--color-plan-starter)"   },
+  { label: "Family",    maxChildren: 3,  description: "Up to 3 children",            color: "var(--color-plan-family)"    },
+  { label: "Unlimited", maxChildren: 10, description: "Up to 10 children",           color: "var(--color-plan-unlimited)" },
 ]
+
+function planPrice(maxChildren) {
+  if (maxChildren === 0) return "Free"
+  if (maxChildren === 1) return "$4/mo"
+  if (maxChildren === 3) return "$9/mo"
+  return "$15/mo"
+}
 
 export default function Plan() {
   const { authFetch } = useAuth()
@@ -19,14 +26,17 @@ export default function Plan() {
 
   useEffect(() => {
     authFetch("/api/me")
-      .then(r => r.ok ? r.json() : null)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(data => {
         if (data) {
           setCurrent(data.maxChildren ?? 0)
           setSelected(data.maxChildren ?? 0)
         }
       })
-      .catch(() => {})
+      .catch(err => {
+        console.error("[Plan] failed to load plan data:", err)
+        setError("Failed to load plan. Please refresh.")
+      })
   }, [authFetch])
 
   async function handleSave() {
@@ -51,34 +61,25 @@ export default function Plan() {
     }
   }
 
-  const activePlan    = PLANS.find(p => p.maxChildren === current)
-  const saveDisabled  = saving || selected === current || current === null
+  const activePlan   = PLANS.find(p => p.maxChildren === current)
+  const saveDisabled = saving || selected === current || current === null
 
   return (
-    <div style={{ padding: "40px 48px", maxWidth: 700, margin: "0 auto", fontFamily: fonts.sans }}>
-      {/* Header */}
-      <div style={{ marginBottom: 36 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", color: colors.indigo, marginBottom: 6, fontFamily: fonts.mono }}>
-          ACCOUNT
-        </div>
-        <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: colors.text }}>Plan</h1>
-        <p style={{ margin: "8px 0 0", color: colors.muted, fontSize: 14 }}>
-          Simulate choosing a plan to unlock child slots.
-        </p>
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <div className={styles.sectionLabel}>ACCOUNT</div>
+        <h1 className={styles.heading}>Plan</h1>
+        <p className={styles.subheading}>Simulate choosing a plan to unlock child slots.</p>
       </div>
 
-      {/* Current status */}
       {current !== null && (
-        <div style={{
-          background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12,
-          padding: "16px 20px", marginBottom: 28, display: "flex", alignItems: "center", gap: 12,
-        }}>
-          <span style={{ fontSize: 20 }}>📋</span>
+        <div className={styles.currentPlan}>
+          <span className={styles.currentPlanIcon}>📋</span>
           <div>
-            <div style={{ fontSize: 13, color: colors.muted }}>Current plan</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: colors.text }}>
+            <div className={styles.currentPlanLabel}>Current plan</div>
+            <div className={styles.currentPlanName}>
               {activePlan?.label ?? "Custom"}{" "}
-              <span style={{ fontWeight: 400, color: colors.muted, fontSize: 13 }}>
+              <span className={styles.currentPlanDetail}>
                 — {current === 0 ? "no children allowed" : `up to ${current} ${current === 1 ? "child" : "children"}`}
               </span>
             </div>
@@ -86,68 +87,45 @@ export default function Plan() {
         </div>
       )}
 
-      {/* Plan cards */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 28 }}>
+      <div className={styles.planList}>
         {PLANS.map(plan => {
           const isSelected = selected === plan.maxChildren
+          // Per-plan accent colour is data-driven — border and background stay inline when selected
           return (
             <button
               key={plan.label}
               onClick={() => setSelected(plan.maxChildren)}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                background: isSelected ? `${plan.color}18` : colors.surface,
-                border: `2px solid ${isSelected ? plan.color : colors.border}`,
-                borderRadius: 12, padding: "18px 22px", cursor: "pointer", textAlign: "left",
-                transition: "border-color 0.15s, background 0.15s",
-                fontFamily: fonts.sans,
-              }}
+              className={styles.planCard}
+              style={isSelected ? {
+                borderColor: plan.color,
+                background: `${plan.color}18`,
+              } : undefined}
             >
               <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: isSelected ? colors.text : colors.text }}>
-                  {plan.label}
-                </div>
-                <div style={{ fontSize: 13, color: colors.muted, marginTop: 2 }}>{plan.description}</div>
+                <div className={styles.planCardName}>{plan.label}</div>
+                <div className={styles.planCardDesc}>{plan.description}</div>
               </div>
-              <div style={{
-                fontSize: 13, fontWeight: 700,
-                color: isSelected ? plan.color : colors.muted,
-                background: isSelected ? `${plan.color}22` : "transparent",
-                border: `1px solid ${isSelected ? plan.color : colors.border}`,
-                borderRadius: 8, padding: "4px 12px",
-              }}>
-                {plan.maxChildren === 0 ? "Free" : plan.maxChildren === 1 ? "$4/mo" : plan.maxChildren === 3 ? "$9/mo" : "$15/mo"}
+              <div
+                className={styles.planCardPrice}
+                style={isSelected ? {
+                  color: plan.color,
+                  borderColor: plan.color,
+                  background: `${plan.color}22`,
+                } : undefined}
+              >
+                {planPrice(plan.maxChildren)}
               </div>
             </button>
           )
         })}
       </div>
 
-      {/* Save */}
-      {error && (
-        <div style={{
-          background: "rgba(255,71,87,0.08)", border: `1px solid rgba(255,71,87,0.3)`, borderRadius: 8,
-          color: colors.danger, fontSize: 13, padding: "10px 14px", marginBottom: 16,
-        }}>
-          {error}
-        </div>
-      )}
-      <button
-        onClick={handleSave}
-        disabled={saveDisabled}
-        style={{
-          background: saveDisabled ? colors.surface : colors.indigo,
-          color: saveDisabled ? colors.muted : "#fff",
-          border: "none", borderRadius: 8, fontSize: 14, fontWeight: 700,
-          padding: "11px 28px", cursor: saveDisabled ? "not-allowed" : "pointer",
-          transition: "background 0.15s",
-        }}
-      >
+      {error && <div className={styles.errorBox}>{error}</div>}
+
+      <button onClick={handleSave} disabled={saveDisabled} className={styles.saveBtn}>
         {saving ? "Saving…" : saved ? "✓ Plan updated" : "Apply plan"}
       </button>
-      <p style={{ fontSize: 12, color: colors.muted, marginTop: 12 }}>
-        This is a simulation — no real payment is processed.
-      </p>
+      <p className={styles.saveNote}>This is a simulation — no real payment is processed.</p>
     </div>
   )
 }

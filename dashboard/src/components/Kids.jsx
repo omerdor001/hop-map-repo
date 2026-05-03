@@ -1,18 +1,15 @@
 import { useState, useEffect } from "react"
 import { getInitials } from "../utils/eventHelpers"
 import { useAuth } from "../context/AuthContext"
-import { colors, fonts } from "../utils/theme"
+import { useChildren } from "../context/ChildrenContext"
 import AddChildModal from "./AddChildModal"
+import styles from "./Kids.module.css"
 
-const card = {
-  background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 12,
-  padding: "20px 24px", display: "flex", alignItems: "center", gap: 16,
-}
-
-export default function Kids({ setChildList }) {
+export default function Kids() {
   const { authFetch } = useAuth()
-  const [children, setChildren]       = useState([])
+  const { childList: children, refreshChildren, childrenError } = useChildren()
   const [maxChildren, setMaxChildren] = useState(null)
+  const [fetchError, setFetchError]   = useState(null)
   const [editing, setEditing]         = useState({})
   const [saving, setSaving]           = useState({})
   const [saved, setSaved]             = useState({})
@@ -20,14 +17,14 @@ export default function Kids({ setChildList }) {
   const [addOpen, setAddOpen]         = useState(false)
 
   useEffect(() => {
-    authFetch("/api/children")
-      .then(r => r.ok ? r.json() : null)
-      .then(data => setChildren(data?.children || []))
-      .catch(() => {})
     authFetch("/api/me")
-      .then(r => r.ok ? r.json() : null)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(data => setMaxChildren(data?.maxChildren ?? 0))
-      .catch(() => {})
+      .catch(err => {
+        console.error("[Kids] failed to load account data:", err)
+        setMaxChildren(0) // fail-safe: disable Add until data loads
+        setFetchError("Failed to load account data. Please refresh.")
+      })
   }, [authFetch])
 
   function startEdit(child) {
@@ -47,8 +44,7 @@ export default function Kids({ setChildList }) {
         body: JSON.stringify({ childName: name }),
       })
       if (!res.ok) throw new Error("Server error")
-      setChildren(c => c.map(ch => ch.childId === childId ? { ...ch, childName: name } : ch))
-      if (setChildList) setChildList(c => c.map(ch => ch.childId === childId ? { ...ch, childName: name } : ch))
+      await refreshChildren()
       setEditing(e => { const n = { ...e }; delete n[childId]; return n })
       setSaved(s => ({ ...s, [childId]: true }))
       setTimeout(() => setSaved(s => { const n = { ...s }; delete n[childId]; return n }), 2000)
@@ -59,138 +55,105 @@ export default function Kids({ setChildList }) {
     }
   }
 
-  function handleChildCreated(newChild) {
-    const child = { childId: newChild.childId, childName: newChild.childName }
-    setChildren(c => [child, ...c])
-    if (setChildList) setChildList(c => [child, ...c])
-  }
-
   const atLimit = maxChildren !== null && children.length >= maxChildren
   const canAdd  = !atLimit
 
   return (
     <>
-      <AddChildModal open={addOpen} onClose={() => setAddOpen(false)} onCreated={handleChildCreated} />
+      <AddChildModal open={addOpen} onClose={() => setAddOpen(false)} onCreated={refreshChildren} />
 
-      <div style={{ padding: "40px 48px", maxWidth: 700, margin: "0 auto", fontFamily: fonts.sans }}>
-        {/* Header */}
-        <div style={{ marginBottom: 32 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", color: colors.indigo, marginBottom: 6, fontFamily: fonts.mono }}>
-            ACCOUNT
-          </div>
-          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, color: colors.text }}>Kids Management</h1>
-          <p style={{ margin: "8px 0 0", color: colors.muted, fontSize: 14 }}>
+      <div className={styles.page}>
+        {(fetchError || childrenError) && (
+          <div className={styles.pageError}>{fetchError || childrenError}</div>
+        )}
+        <div className={styles.header}>
+          <div className={styles.sectionLabel}>ACCOUNT</div>
+          <h1 className={styles.heading}>Kids Management</h1>
+          <p className={styles.subheading}>
             Manage monitored children and install the agent on their PCs.
           </p>
           <button
             onClick={() => canAdd && setAddOpen(true)}
             disabled={!canAdd}
             title={atLimit ? "Upgrade your plan to add more children" : undefined}
-            style={{
-              background: canAdd ? colors.indigo : colors.surface,
-              color: canAdd ? "#fff" : colors.muted,
-              border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700,
-              padding: "9px 18px", cursor: canAdd ? "pointer" : "not-allowed", marginTop: 20,
-            }}
+            className={styles.addBtn}
           >
             + Add child
           </button>
           {atLimit && maxChildren === 0 && (
-            <div style={{ fontSize: 13, color: colors.warning, marginTop: 10 }}>
+            <div className={styles.limitMsg}>
               You're on the Free plan.{" "}
-              <a href="/plan" style={{ color: colors.indigo }}>Upgrade</a>{" "}to add children.
+              <a href="/plan" className={styles.limitLink}>Upgrade</a>{" "}to add children.
             </div>
           )}
           {atLimit && maxChildren > 0 && (
-            <div style={{ fontSize: 13, color: colors.warning, marginTop: 10 }}>
+            <div className={styles.limitMsg}>
               Child limit reached ({maxChildren}).{" "}
-              <a href="/plan" style={{ color: colors.indigo }}>Upgrade your plan</a>{" "}to add more.
+              <a href="/plan" className={styles.limitLink}>Upgrade your plan</a>{" "}to add more.
             </div>
           )}
         </div>
 
-        {/* List */}
         {children.length === 0 ? (
-          <div style={{ color: colors.muted, fontSize: 14, padding: "32px 0" }}>
+          <div className={styles.emptyMsg}>
             No children yet.{" "}
             {canAdd ? (
-              <span
-                style={{ color: colors.indigo, cursor: "pointer", textDecoration: "underline" }}
-                onClick={() => setAddOpen(true)}
-              >
+              <span className={styles.emptyLink} onClick={() => setAddOpen(true)}>
                 Add your first child
               </span>
             ) : (
-              <a href="/plan" style={{ color: colors.indigo }}>Upgrade your plan</a>
+              <a href="/plan" className={styles.limitLink}>Upgrade your plan</a>
             )}{" "}
             to get started.
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className={styles.childList}>
             {children.map(child => {
               const isEditing = editing[child.childId] !== undefined
               return (
-                <div key={child.childId} style={card}>
-                  {/* Avatar */}
-                  <div style={{
-                    width: 40, height: 40, borderRadius: "50%", flexShrink: 0,
-                    background: "linear-gradient(135deg, #6366f1, #818cf8)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 15, fontWeight: 700, color: "#fff",
-                  }}>
-                    {getInitials(child.childName)}
-                  </div>
+                <div key={child.childId} className={styles.card}>
+                  <div className={styles.avatar}>{getInitials(child.childName)}</div>
 
-                  {/* Name / input */}
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, color: colors.muted, marginBottom: 2, fontFamily: fonts.mono }}>
-                      ID: {child.childId}
-                    </div>
+                  <div className={styles.cardBody}>
+                    <div className={styles.childId}>ID: {child.childId}</div>
                     {isEditing ? (
                       <input
                         autoFocus
+                        className={styles.nameInput}
                         value={editing[child.childId]}
                         onChange={e => setEditing(ed => ({ ...ed, [child.childId]: e.target.value }))}
                         onKeyDown={e => {
                           if (e.key === "Enter") saveName(child.childId)
                           if (e.key === "Escape") setEditing(ed => { const n = { ...ed }; delete n[child.childId]; return n })
                         }}
-                        style={{
-                          background: colors.bg, border: `1px solid ${colors.indigo}`, borderRadius: 6,
-                          color: colors.text, fontSize: 15, fontWeight: 600, padding: "4px 10px",
-                          outline: "none", width: "100%", maxWidth: 260, fontFamily: fonts.sans,
-                        }}
                       />
                     ) : (
-                      <div style={{ fontSize: 15, fontWeight: 600, color: colors.text }}>{child.childName}</div>
+                      <div className={styles.childName}>{child.childName}</div>
                     )}
                     {error[child.childId] && (
-                      <div style={{ fontSize: 12, color: colors.danger, marginTop: 3 }}>{error[child.childId]}</div>
+                      <div className={styles.fieldError}>{error[child.childId]}</div>
                     )}
                   </div>
 
-                  {/* Actions */}
-                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <div className={styles.cardActions}>
                     {isEditing ? (
                       <>
-                        <button onClick={() => saveName(child.childId)} disabled={saving[child.childId]} style={{
-                          background: colors.indigo, color: "#fff", border: "none", borderRadius: 7,
-                          padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer",
-                        }}>
+                        <button
+                          onClick={() => saveName(child.childId)}
+                          disabled={saving[child.childId]}
+                          className={styles.btnSave}
+                        >
                           {saving[child.childId] ? "Saving…" : "Save"}
                         </button>
-                        <button onClick={() => setEditing(ed => { const n = { ...ed }; delete n[child.childId]; return n })} style={{
-                          background: "transparent", color: colors.muted, border: `1px solid ${colors.border}`,
-                          borderRadius: 7, padding: "6px 12px", fontSize: 13, cursor: "pointer",
-                        }}>
+                        <button
+                          onClick={() => setEditing(ed => { const n = { ...ed }; delete n[child.childId]; return n })}
+                          className={styles.btnCancel}
+                        >
                           Cancel
                         </button>
                       </>
                     ) : (
-                      <button onClick={() => startEdit(child)} style={{
-                        background: "transparent", color: colors.indigoLight, border: `1px solid ${colors.border}`,
-                        borderRadius: 7, padding: "6px 14px", fontSize: 13, fontWeight: 500, cursor: "pointer",
-                      }}>
+                      <button onClick={() => startEdit(child)} className={styles.btnRename}>
                         {saved[child.childId] ? "✓ Saved" : "Rename"}
                       </button>
                     )}

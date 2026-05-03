@@ -1,4 +1,5 @@
-import { colors, fonts } from "./theme"
+/* eslint-disable react-refresh/only-export-components */
+import styles from "./eventHelpers.module.css"
 
 export const AVATAR_GRADS = [
   "linear-gradient(135deg,#6366f1,#8b5cf6)",
@@ -8,11 +9,11 @@ export const AVATAR_GRADS = [
   "linear-gradient(135deg,#f59e0b,#fbbf24)",
 ]
 
-// Severity → display config used by Badge and the Alerts timeline.
+// Severity → display config used by Badge and the event timeline.
 export const typeConfig = {
-  SAFE:   { label: "SAFE",      color: colors.success, bg: "rgba(46,213,115,0.13)"  },
-  MEDIUM: { label: "WARNING",   color: colors.warning,  bg: "rgba(255,165,2,0.13)"   },
-  HIGH:   { label: "HIGH RISK", color: colors.danger,   bg: "rgba(255,71,87,0.13)"   },
+  SAFE:   { label: "SAFE",      color: "var(--color-success)", bg: "var(--color-success-bg)", border: "var(--color-success-border)" },
+  MEDIUM: { label: "WARNING",   color: "var(--color-warning)",  bg: "var(--color-warning-bg)",  border: "var(--color-warning-border)"  },
+  HIGH:   { label: "HIGH RISK", color: "var(--color-danger)",   bg: "var(--color-danger-bg)",   border: "var(--color-danger-border)"   },
 }
 
 export function getInitials(name) {
@@ -72,48 +73,34 @@ export function todayDefault() {
 
 export function Badge({ risk }) {
   const c = typeConfig[risk]
+  // color, background, borderColor are data-driven — stay inline
   return (
-    <span style={{
-      fontSize: 9, fontWeight: 700, letterSpacing: "0.07em",
-      color: c.color, background: c.bg,
-      border: `1px solid ${c.color}33`,
-      borderRadius: 4, padding: "2px 6px",
-      fontFamily: fonts.mono, whiteSpace: "nowrap",
-    }}>{c.label}</span>
+    <span
+      className={styles.badge}
+      style={{ color: c.color, background: c.bg, borderColor: c.border }}
+    >
+      {c.label}
+    </span>
   )
 }
 
 export function StatCard({ label, val, color, sub }) {
+  // borderTop color is a prop — stays inline
   return (
-    <div style={{
-      background: colors.surface,
-      border: `1px solid ${colors.border}`,
-      borderTop: `3px solid ${color}`,
-      borderRadius: 10, padding: "12px 14px",
-    }}>
-      <div style={{
-        fontSize: 9, color: colors.muted, letterSpacing: "0.1em",
-        fontFamily: fonts.mono, marginBottom: 5,
-      }}>{label}</div>
-      <div style={{
-        fontSize: 30, fontWeight: 700, color, lineHeight: 1,
-        fontFamily: fonts.mono, marginBottom: 3,
-      }}>{val}</div>
-      <div style={{ fontSize: 10, color: colors.muted }}>{sub}</div>
+    <div className={styles.statCard} style={{ borderTop: `3px solid ${color}` }}>
+      <div className={styles.statLabel}>{label}</div>
+      <div className={styles.statValue} style={{ color }}>{val}</div>
+      <div className={styles.statSub}>{sub}</div>
     </div>
   )
 }
 
 export function Dot({ color, pulse }) {
+  // background is a prop — stays inline
   return (
-    <span style={{ position: "relative", display: "inline-flex", width: 9, height: 9, flexShrink: 0 }}>
-      {pulse && (
-        <span style={{
-          position: "absolute", inset: 0, borderRadius: "50%",
-          background: color, animation: "ping 1.8s ease-out infinite", opacity: 0.7,
-        }} />
-      )}
-      <span style={{ position: "absolute", inset: 1, borderRadius: "50%", background: color }} />
+    <span className={styles.dot}>
+      {pulse && <span className={styles.dotPulse} style={{ background: color }} />}
+      <span className={styles.dotCore} style={{ background: color }} />
     </span>
   )
 }
