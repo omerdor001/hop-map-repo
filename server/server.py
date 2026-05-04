@@ -193,8 +193,8 @@ app.state.limiter = limiter
 app.add_exception_handler(DatabaseCircuitOpenError, _on_db_circuit_open)
 app.add_exception_handler(RateLimitExceeded, _on_rate_limit_exceeded)
 
-# SlowAPIMiddleware must be added before CORSMiddleware so that rate-limited
-# requests are rejected before CORS headers are processed.
+# Starlette wraps middleware in reverse-insertion order — CORS runs first.
+# Rate-limited responses carry CORS headers so browsers can read the 429 body.
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,

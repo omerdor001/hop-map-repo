@@ -1,0 +1,200 @@
+.page {
+  min-height: 100vh;
+  background: var(--color-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  padding: 40px 36px;
+  width: 380px;
+  box-sizing: border-box;
+}
+
+/* ── Brand ───────────────────────────────────────────────────────────────── */
+.brand {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.brandName {
+  font-size: 28px;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.5px;
+}
+
+.brandAccent { color: var(--color-indigo); }
+
+.brandSub {
+  font-size: 13px;
+  color: var(--color-muted);
+  margin-top: 4px;
+}
+
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  background: var(--color-bg);
+  border-radius: 8px;
+  padding: 4px;
+  margin-bottom: 24px;
+  gap: 4px;
+}
+
+.tab {
+  flex: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 0;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.tab:hover {
+  color: var(--color-text);
+}
+
+.tabActive {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: #fff;
+}
+
+/* ── Form ────────────────────────────────────────────────────────────────── */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.label {
+  font-size: 12px;
+  color: var(--color-muted);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.labelHint {
+  color: var(--color-muted);
+  margin-left: 6px;
+}
+
+.input {
+  width: 100%;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  padding: 10px 14px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.input:focus {
+  border-color: var(--color-indigo);
+}
+
+.errorBox {
+  background: #1f0f0f;
+  border: 1px solid #7f1d1d;
+  border-radius: 6px;
+  padding: 9px 12px;
+  color: #f87171;
+  font-size: 13px;
+}
+
+.btn {
+  width: 100%;
+  background: var(--color-indigo);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 11px 0;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: background 0.15s;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--color-indigo-light);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Password strength meter ─────────────────────────────────────────────── */
+.strengthMeter {
+  margin-top: 6px;
+}
+
+.strengthTrack {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.strengthBar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 200ms ease, background 200ms ease;
+}
+
+.strengthMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 4px;
+}
+
+.strengthLabel    { font-size: 11px; font-weight: 600; }
+.strengthHint     { font-size: 11px; color: var(--color-muted); }
+
+.errorList {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.errorItem {
+  font-size: 11px;
+  color: #ef4444;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+.footer {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 12px;
+  color: var(--color-muted);
+}
+
+.footerLink {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--color-indigo);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.footerLink:hover {
+  color: var(--color-indigo-light);
+}

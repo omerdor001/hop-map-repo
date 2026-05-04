@@ -6,7 +6,7 @@ from pymongo.errors import ConnectionFailure, PyMongoError
 from config import config_manager
 from core.db_circuit_breaker import DatabaseCircuitBreaker, ProtectedCollection
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 class DatabasePool:
@@ -49,9 +49,9 @@ class DatabasePool:
             )
             self._client.admin.command("ping")
             self._db = self._client[self.db_name]
-            logger.info("MongoDB connected: %s/%s", self.uri, self.db_name)
+            log.info("MongoDB connected: %s/%s", self.uri, self.db_name)
         except (ConnectionFailure, PyMongoError) as e:
-            logger.warning("MongoDB unavailable at startup: %s", e)
+            log.warning("MongoDB unavailable at startup: %s", e)
             self._client = None
             self._db     = None
 

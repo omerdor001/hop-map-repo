@@ -9,7 +9,7 @@ from pymongo import UpdateOne
 from core.database import pool
 from config import config_manager
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 def _col_words():
@@ -39,7 +39,7 @@ def remove_word(word: str) -> bool:
 
 def seed_words_from_excel(path: str) -> int:
     if not os.path.exists(path):
-        logger.warning("seed_words_from_excel: file not found at %r", path)
+        log.warning("seed_words_from_excel: file not found at %r", path)
         return 0
     try:
         wb = openpyxl.load_workbook(path, read_only=True)
@@ -50,7 +50,7 @@ def seed_words_from_excel(path: str) -> int:
                 word_col_idx = cell.column - 1
                 break
         if word_col_idx is None:
-            logger.warning("seed_words_from_excel: no 'word' column found in %r", path)
+            log.warning("seed_words_from_excel: no 'word' column found in %r", path)
             wb.close()
             return 0
         ops = []
@@ -66,10 +66,10 @@ def seed_words_from_excel(path: str) -> int:
         wb.close()
         if ops:
             _col_words().bulk_write(ops, ordered=False)
-        logger.info("seed_words_from_excel: processed %d words from %r", len(ops), path)
+        log.info("seed_words_from_excel: processed %d words from %r", len(ops), path)
         return len(ops)
     except Exception as exc:
-        logger.warning("seed_words_from_excel failed: %s", exc)
+        log.warning("seed_words_from_excel failed: %s", exc)
         return 0
 
 
