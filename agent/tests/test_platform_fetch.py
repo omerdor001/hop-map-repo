@@ -48,9 +48,9 @@ class TestFetchPlatformDb:
 
     def setup_method(self):
         """Reset runtime globals before each test."""
-        _agent._PLATFORM_APP_MAP  = {}
-        _agent._BROWSER_PROCESSES = frozenset()
-        _agent._TRANSIT_PROCESSES = frozenset()
+        _agent._platform_app_map  = {}
+        _agent._browser_processes = frozenset()
+        _agent._transit_processes = frozenset()
 
     def test_populates_platform_map_from_server(self):
         server_data = {
@@ -61,8 +61,8 @@ class TestFetchPlatformDb:
         with patch("requests.get", return_value=_ok_response(server_data)):
             _agent._fetch_platform_db()
 
-        assert "discord" in _agent._PLATFORM_APP_MAP
-        assert "discord.exe" in _agent._PLATFORM_APP_MAP["discord"]
+        assert "discord" in _agent._platform_app_map
+        assert "discord.exe" in _agent._platform_app_map["discord"]
 
     def test_populates_browsers_from_server(self):
         server_data = {
@@ -73,8 +73,8 @@ class TestFetchPlatformDb:
         with patch("requests.get", return_value=_ok_response(server_data)):
             _agent._fetch_platform_db()
 
-        assert "chrome.exe" in _agent._BROWSER_PROCESSES
-        assert "firefox.exe" in _agent._BROWSER_PROCESSES
+        assert "chrome.exe" in _agent._browser_processes
+        assert "firefox.exe" in _agent._browser_processes
 
     def test_populates_transit_from_server(self):
         server_data = {
@@ -85,7 +85,7 @@ class TestFetchPlatformDb:
         with patch("requests.get", return_value=_ok_response(server_data)):
             _agent._fetch_platform_db()
 
-        assert "explorer.exe" in _agent._TRANSIT_PROCESSES
+        assert "explorer.exe" in _agent._transit_processes
 
     def test_falls_back_to_defaults_on_connection_error(self):
         with patch("requests.get",
@@ -93,13 +93,13 @@ class TestFetchPlatformDb:
             _agent._fetch_platform_db()
 
         # Defaults include "discord.exe" for discord platform.
-        assert "discord" in _agent._PLATFORM_APP_MAP
+        assert "discord" in _agent._platform_app_map
 
     def test_falls_back_to_defaults_on_http_error(self):
         with patch("requests.get", return_value=_error_response(503)):
             _agent._fetch_platform_db()
 
-        assert "discord" in _agent._PLATFORM_APP_MAP
+        assert "discord" in _agent._platform_app_map
 
     def test_falls_back_when_server_returns_empty_platform_map(self):
         """An empty platform map from the server triggers the fallback."""
@@ -108,7 +108,7 @@ class TestFetchPlatformDb:
             _agent._fetch_platform_db()
 
         # Defaults must be active.
-        assert len(_agent._PLATFORM_APP_MAP) > 0
+        assert len(_agent._platform_app_map) > 0
 
     def test_falls_back_on_invalid_json_structure(self):
         """A response missing the 'platforms' key triggers the ValueError fallback."""
@@ -118,7 +118,7 @@ class TestFetchPlatformDb:
         with patch("requests.get", return_value=_ok_response(server_data)):
             _agent._fetch_platform_db()
 
-        assert len(_agent._PLATFORM_APP_MAP) > 0
+        assert len(_agent._platform_app_map) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +258,7 @@ class TestActivateAgent:
         post_mock.assert_not_called()
 
     def test_success_writes_token_and_clears_setup_code(self, tmp_path):
-        """On 200, the real token is written to disk and the setup code is cleared."""
+        """On 200, the token is stored in the credential manager and setup_code cleared from JSON."""
         config_file = self._make_config(tmp_path, setup_code="one-time-code")
         new_token = "a" * 64
 
@@ -268,15 +268,17 @@ class TestActivateAgent:
              patch.object(_agent.config_manager, "agent_token", ""), \
              patch.object(_agent.config_manager, "backend_url", "http://localhost:8000"), \
              patch.object(_agent, "_CONFIG_FILE", config_file), \
-             patch("requests.post", post_mock):
+             patch("requests.post", post_mock), \
+             patch.object(_agent.keyring, "set_password") as mock_set_password:
             _agent._activate()
 
         post_mock.assert_called_once()
-        call_kwargs = post_mock.call_args
-        assert call_kwargs[1]["json"] == {"setupCode": "one-time-code"}
+        assert post_mock.call_args[1]["json"] == {"setupCode": "one-time-code"}
 
+        # Token stored in credential manager, not written to JSON.
+        mock_set_password.assert_called_once_with("hopmap-agent", "agent_token", new_token)
         saved = json.loads(config_file.read_text(encoding="utf-8"))
-        assert saved["agent_token"] == new_token
+        assert saved.get("agent_token", "") != new_token  # real token never touches disk
         assert saved["setup_code"] == ""
 
     def test_exits_on_400_invalid_code(self, tmp_path):
@@ -305,6 +307,61 @@ class TestActivateAgent:
              patch.object(_agent, "_CONFIG_FILE", config_file), \
              patch("requests.post",
                    side_effect=_real_requests.exceptions.ConnectionError("refused")):
+            with pytest.raises(SystemExit) as exc_info:
+                _agent._activate()
+
+        assert exc_info.value.code == 1
+
+    def test_in_memory_config_updated_after_activation(self, tmp_path):
+        """After activation, config_manager carries the new token in-memory so
+        subsequent HTTP calls in the same process use it without a restart."""
+        config_file = self._make_config(tmp_path, setup_code="code-xyz")
+        new_token = "z" * 32
+
+        with patch.object(_agent.config_manager, "setup_code", "code-xyz"), \
+             patch.object(_agent.config_manager, "agent_token", ""), \
+             patch.object(_agent.config_manager, "backend_url", "http://localhost:8000"), \
+             patch.object(_agent, "_CONFIG_FILE", config_file), \
+             patch("requests.post", return_value=_ok_response({"agentToken": new_token})), \
+             patch.object(_agent.keyring, "set_password"):
+            _agent._activate()
+            # Assert while patches are still active so we see the live in-memory state.
+            assert _agent.config_manager.agent_token == new_token
+            assert _agent.config_manager.setup_code == ""
+
+    def test_exits_when_config_clear_fails_after_keyring_write(self):
+        """If the JSON write to clear setup_code fails after the token was already
+        stored in the credential manager, _activate() exits rather than leaving
+        the agent in an inconsistent state (token stored but setup_code still live)."""
+        config_file_mock = MagicMock()
+        config_file_mock.read_text.return_value = json.dumps(
+            {"backend_url": "http://localhost:8000", "setup_code": "some-code"}
+        )
+        config_file_mock.write_text.side_effect = OSError("disk full")
+
+        with patch.object(_agent.config_manager, "setup_code", "some-code"), \
+             patch.object(_agent.config_manager, "agent_token", ""), \
+             patch.object(_agent.config_manager, "backend_url", "http://localhost:8000"), \
+             patch.object(_agent, "_CONFIG_FILE", config_file_mock), \
+             patch("requests.post", return_value=_ok_response({"agentToken": "tok-xyz"})), \
+             patch.object(_agent.keyring, "set_password"):
+            with pytest.raises(SystemExit) as exc_info:
+                _agent._activate()
+
+        assert exc_info.value.code == 1
+
+    def test_exits_when_credential_manager_fails(self, tmp_path):
+        """If keyring.set_password raises, _activate() exits rather than
+        continuing with a token that was never persisted."""
+        config_file = self._make_config(tmp_path, setup_code="some-code")
+
+        with patch.object(_agent.config_manager, "setup_code", "some-code"), \
+             patch.object(_agent.config_manager, "agent_token", ""), \
+             patch.object(_agent.config_manager, "backend_url", "http://localhost:8000"), \
+             patch.object(_agent, "_CONFIG_FILE", config_file), \
+             patch("requests.post", return_value=_ok_response({"agentToken": "tok-xyz"})), \
+             patch.object(_agent.keyring, "set_password",
+                          side_effect=Exception("OS keyring unavailable")):
             with pytest.raises(SystemExit) as exc_info:
                 _agent._activate()
 

@@ -17,8 +17,12 @@ Setup:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+
+import keyring
 
 from pydantic import Field, field_validator
+from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     JsonConfigSettingsSource,
@@ -27,6 +31,29 @@ from pydantic_settings import (
 )
 
 _CONFIG_FILE = Path(__file__).parent.resolve() / "agent_config.json"
+_KEYRING_SERVICE = "hopmap-agent"
+
+
+class CredentialManagerSource(PydanticBaseSettingsSource):
+    """Reads agent secrets from the OS credential store (Windows Credential Manager).
+
+    Higher priority than the JSON file so agent_token is never loaded from disk.
+    Falls back silently to empty string when the store is unavailable (first run,
+    CI environment, or unsupported platform).
+    """
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        return self.__call__().get(field_name), field_name, False
+
+    def field_is_complex(self, field: FieldInfo) -> bool:
+        return False
+
+    def __call__(self) -> dict[str, Any]:
+        try:
+            token = keyring.get_password(_KEYRING_SERVICE, "agent_token") or ""
+        except Exception:
+            token = ""
+        return {"agent_token": token} if token else {}
 
 
 class AgentConfig(BaseSettings):
@@ -64,11 +91,12 @@ class AgentConfig(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # Priority (first = highest): init > env vars > .env file > JSON config > defaults
+        # Priority (first = highest): init > env > .env > credential store > JSON > defaults
         return (
             init_settings,
             env_settings,
             dotenv_settings,
+            CredentialManagerSource(settings_cls),
             JsonConfigSettingsSource(settings_cls, json_file=_CONFIG_FILE),
         )
 
