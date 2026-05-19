@@ -80,6 +80,11 @@ if (Test-Path $InstallDir) {{
     Write-Host "  [+] $InstallDir already gone." -ForegroundColor Green
 }}
 
+# -- 4. Remove stored credential from Windows Credential Manager --------------
+Write-Host "  [*] Removing stored credentials..." -ForegroundColor Cyan
+cmdkey /delete:hopmap-agent 2>$null | Out-Null
+Write-Host "  [+] Credentials removed." -ForegroundColor Green
+
 # -- Done ---------------------------------------------------------------------
 Write-Host ""
 Write-Host "  [OK] HopMap agent removed successfully for {safe_name}." -ForegroundColor Green
@@ -256,6 +261,7 @@ Write-Ok "Tesseract: $TesseractPath"
 # -- 3. Create install directory ----------------------------------------------
 Write-Step "Creating install directory $InstallDir..."
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+icacls $InstallDir /inheritance:r /grant "SYSTEM:(OI)(CI)F" /grant "Administrators:(OI)(CI)F" | Out-Null
 Write-Ok "Directory ready: $InstallDir"
 
 # -- 4. Download agent files --------------------------------------------------
@@ -270,7 +276,6 @@ $Config = @{{
     scan_interval_seconds    = 5.0
     context_lines            = 10
     setup_code               = $SetupCode
-    agent_token              = ''
 }} | ConvertTo-Json
 [System.IO.File]::WriteAllText("$InstallDir\\agent_config.json", $Config)
 Write-Ok "agent_config.json written (agent will activate on first run)."

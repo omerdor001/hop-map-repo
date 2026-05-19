@@ -14,6 +14,8 @@ from unittest.mock import patch
 
 import pytest
 
+import config as _cfg_mod  # agent/config.py, pre-loaded by conftest
+
 # Ensure agent/ is importable (already handled by conftest but safe to repeat).
 _AGENT_DIR = Path(__file__).resolve().parent.parent
 if str(_AGENT_DIR) not in sys.path:
@@ -107,3 +109,55 @@ class TestAgentConfigFromJson:
     def test_custom_context_lines_loaded(self, tmp_path):
         cfg = _load_config({"context_lines": 5}, tmp_path=tmp_path)
         assert cfg.context_lines == 5
+
+
+class TestCredentialManagerSource:
+    """Unit tests for CredentialManagerSource — the Pydantic settings source
+    that reads agent_token from the OS credential store.
+
+    _cfg_mod.keyring is already a MagicMock stub (injected by conftest).
+    Each test patches get_password on that stub to exercise one behaviour,
+    then asserts exactly what __call__() returns.
+    """
+
+    def _make_source(self):
+        return _cfg_mod.CredentialManagerSource(_cfg_mod.AgentConfig)
+
+    def test_returns_token_when_keyring_has_entry(self):
+        with patch.object(_cfg_mod.keyring, "get_password", return_value="tok-abc123"):
+            result = self._make_source()()
+        assert result == {"agent_token": "tok-abc123"}
+
+    def test_returns_empty_dict_when_keyring_returns_none(self):
+        with patch.object(_cfg_mod.keyring, "get_password", return_value=None):
+            result = self._make_source()()
+        assert result == {}
+
+    def test_returns_empty_dict_when_keyring_raises(self):
+        with patch.object(_cfg_mod.keyring, "get_password", side_effect=Exception("OS keyring unavailable")):
+            result = self._make_source()()
+        assert result == {}
+
+    def test_returns_empty_dict_when_keyring_returns_empty_string(self):
+        # An empty-string credential is indistinguishable from no credential —
+        # an unactivated token would let all API calls fail silently.
+        with patch.object(_cfg_mod.keyring, "get_password", return_value=""):
+            result = self._make_source()()
+        assert result == {}
+
+    def test_credential_store_takes_priority_over_json(self, tmp_path):
+        """agent_token from the credential store wins over the same field in the JSON file."""
+        config_file = tmp_path / "agent_config.json"
+        config_file.write_text(
+            json.dumps({"backend_url": "http://localhost:8000", "agent_token": "from-json"}),
+            encoding="utf-8",
+        )
+        spec = _ilu.spec_from_file_location("_cred_prio_mod", _AGENT_CONFIG_PATH)
+        fresh_mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(fresh_mod)
+        fresh_mod._CONFIG_FILE = config_file
+
+        with patch.object(fresh_mod.keyring, "get_password", return_value="from-credential-store"):
+            cfg = fresh_mod.AgentConfig()
+
+        assert cfg.agent_token == "from-credential-store"

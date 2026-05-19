@@ -9,6 +9,7 @@ certifi==2026.4.22        # via requests
 charset-normalizer==3.4.7  # via requests
 colorama==0.4.6           # via pytest
 idna==3.13                # via requests
+keyring==25.6.0           # via -r requirements.in
 iniconfig==2.3.0          # via pytest
 mss==10.2.0               # via -r requirements.in
 packaging==26.2           # via pytesseract, pytest
