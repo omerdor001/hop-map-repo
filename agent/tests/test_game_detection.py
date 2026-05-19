@@ -126,7 +126,7 @@ class TestIsGame:
     def setup_method(self):
         """Reset cache so each test starts fresh."""
         _agent._game_processes_cache = frozenset()
-        _agent._game_cache_updated_at = 0.0
+        _agent._game_cache_updated_at = float("-inf")  # always stale, independent of system uptime
 
     def test_known_game_returns_true(self):
         with patch.object(_agent, "_load_game_processes",
