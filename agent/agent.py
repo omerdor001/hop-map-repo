@@ -405,8 +405,10 @@ _GAME_PROCESSES_FALLBACK: frozenset[str] = frozenset({
 })
 
 # Cache state — refreshed every _GAME_CACHE_TTL seconds.
+# float("-inf") guarantees the first call always triggers a load regardless of
+# how shortly after system boot the agent starts (time.monotonic() epoch).
 _game_processes_cache:    frozenset[str] = frozenset()
-_game_cache_updated_at:   float          = 0.0
+_game_cache_updated_at:   float          = float("-inf")
 _game_cache_lock:         threading.Lock = threading.Lock()
 _GAME_CACHE_TTL:          float          = 60.0
 
