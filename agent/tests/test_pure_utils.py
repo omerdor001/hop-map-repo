@@ -106,14 +106,14 @@ class TestAppMatchesUrl:
 
     def setup_method(self):
         """Inject a known platform map for deterministic tests."""
-        self._orig = _agent._PLATFORM_APP_MAP
-        _agent._PLATFORM_APP_MAP = {
+        self._orig = _agent._platform_app_map
+        _agent._platform_app_map = {
             "discord": frozenset({"discord.exe"}),
             "telegram": frozenset({"telegram.exe"}),
         }
 
     def teardown_method(self):
-        _agent._PLATFORM_APP_MAP = self._orig
+        _agent._platform_app_map = self._orig
 
     def test_matching_platform_and_process_returns_true(self):
         assert _agent._app_matches_url("https://discord.gg/abc", "discord.exe") is True

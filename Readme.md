@@ -7,7 +7,7 @@
 ![MongoDB](https://img.shields.io/badge/MongoDB-7.0+-47A248)
 ![Ollama](https://img.shields.io/badge/Ollama-local--inference-black)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D4)
-![Tests](https://img.shields.io/badge/tests-600%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-655%20passing-brightgreen)
 ![Maintained](https://img.shields.io/badge/maintained-yes-brightgreen)
 
 A full-stack child safety platform that detects and alerts parents when children attempt to "hop" from moderated gaming environments to unmoderated external platforms in real time.
@@ -117,7 +117,7 @@ Agent (first run)
       │
       │ 11. POST /agent/activate  { setupCode }  →  { agentToken }
       │     (setup_code is single-use and expires in 1 hour)
-      │ 12. Writes agentToken into agent_config.json, clears setup_code
+      │ 12. Stores agentToken in Windows Credential Manager (keyring), clears setup_code from agent_config.json
       │ 13. GET /agent/me  →  confirms childId from server
       │ 14. Begins monitoring loop (OCR + clipboard + Win32 hooks)
       ▼
@@ -330,7 +330,7 @@ A FastAPI application that runs on the parent's network. Provides endpoints for 
 | Access token (JWT HS256) | 15 min | Bearer header |
 | Refresh token (64-char hex) | 30 days | httpOnly cookie; SHA-256 hash in MongoDB |
 | Setup code (URL-safe base64) | 1 hour, single-use | SHA-256 hash in child record; embedded in installer `.ps1` |
-| Agent token (64-char hex) | Permanent | SHA-256 hash in child record; exchanged for setup code on first run |
+| Agent token (64-char hex) | Permanent | SHA-256 hash in child record (server); stored in Windows Credential Manager on child's PC (keyring) |
 | Password | — | bcrypt |
 
 ### 4. Agent Installer (`server/agent_installer/`)
@@ -393,11 +393,10 @@ Config priority (highest first): environment variables → `.env` file → `serv
 | `scan_interval_seconds` / `HOPMAP_AGENT_SCAN_INTERVAL_SECONDS` | `5.0` | OCR scan frequency (seconds) |
 | `context_lines` / `HOPMAP_AGENT_CONTEXT_LINES` | `10` | Chat lines sent with each classify request |
 | `setup_code` | `""` | One-time activation code embedded by installer; cleared after first run |
-| `agent_token` | `""` | Permanent token written by agent after activation; used as Bearer credential |
 
 ## 🧪 Testing
 
-600 tests passing across unit, integration, and E2E layers with 0 failures.
+655 tests passing across unit, integration, and E2E layers with 0 failures.
 
 ### Running Tests
 
@@ -415,15 +414,17 @@ python -m pytest agent/tests/ -v
 ### Test Structure
 
 ```
-agent/tests/                    93 tests
-├── test_classify_agent.py      10 — LLM happy/error paths, response parsing
-├── test_config.py               9 — defaults, URL normalisation, JSON loading
-├── test_game_detection.py      16 — Epic/Riot/Registry detection, caching
-├── test_ocr_helpers.py          6 — _grab_window region mapping, _ocr_frame pipeline contract
-├── test_platform_fetch.py      19 — server fetch, fallback on errors, registration
-├── test_process_priority.py     2 — below-normal priority best-effort behaviour
-├── test_pure_utils.py          22 — URL regex, domain parsing, context extraction
-└── test_ttl_cache.py            9 — TTL cache ops, expiry, size bound, thread safety
+agent/tests/                     148 tests
+├── test_classify_agent.py       10 — LLM happy/error paths, response parsing
+├── test_config.py               14 — defaults, URL normalisation, JSON loading, keyring token read
+├── test_game_detection.py       16 — Epic/Riot/Registry detection, caching
+├── test_hop_confirmation.py     24 — _try_late_confirm, _drain_and_confirm, _decide_and_send
+├── test_ocr_helpers.py           6 — _grab_window region mapping, _ocr_frame pipeline contract
+├── test_platform_fetch.py       22 — server fetch, fallback on errors, registration
+├── test_process_priority.py      2 — below-normal priority best-effort behaviour
+├── test_pure_utils.py           22 — URL regex, domain parsing, context extraction
+├── test_sender_loop.py          23 — _enqueue_hop, _send_hop retry/TTL/4xx/5xx, _sender_loop
+└── test_ttl_cache.py             9 — TTL cache ops, expiry, size bound, thread safety
 
 server/tests/                  507 tests
 ├── e2e/
@@ -511,6 +512,8 @@ def _global_test_setup():
 - **MongoDB Circuit Breaker** — Three-state circuit breaker (CLOSED → OPEN → HALF_OPEN) suppresses DB calls after 5 consecutive failures and returns HTTP 503 with `Retry-After` until the circuit self-heals (30 s default)
 - **Startup Secret Validation** — Server checks `JWT_SECRET` length (≥ 32 chars) and rejects the well-known default value; violations are fatal in `production`/`staging` (process exits with code 1) and logged as warnings in `development`
 - **Graceful Degradation** — If the server is unreachable, the agent skips classification and treats the URL as safe rather than blocking the child's session
+- **Agent Token Isolation** — After activation the agent token is removed from `agent_config.json` and stored exclusively in Windows Credential Manager (via `keyring`); the JSON config file never contains a valid token at rest
+- **Hop Delivery Reliability** — Hop events are retried with exponential backoff (5 s → 10 s → 20 s → 30 s) and silently dropped only after all attempts fail or the event exceeds a 5-minute TTL; 4xx rejections are dropped immediately without retrying
 
 ## 📦 Dependencies
 
@@ -538,6 +541,7 @@ mss>=9.0.0
 pytesseract>=0.3.13
 Pillow>=10.0.0
 pyperclip>=1.9.0
+keyring>=24.0.0
 
 # Frontend
 react>=19

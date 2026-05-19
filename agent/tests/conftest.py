@@ -29,6 +29,9 @@ def _make_stub(name: str) -> types.ModuleType:
 # Stub out Windows-only / external modules before any agent import
 # ---------------------------------------------------------------------------
 
+_keyring_stub = MagicMock()
+_keyring_stub.get_password.return_value = None  # no stored token → clean config load
+
 _STUBS = {
     "winreg":           MagicMock(),
     "win32gui":         MagicMock(),
@@ -39,6 +42,7 @@ _STUBS = {
     "psutil":           MagicMock(),
     "PIL":              MagicMock(),
     "PIL.Image":        MagicMock(),
+    "keyring":          _keyring_stub,
 }
 
 # Make ctypes.windll available without a real Win32 environment.
