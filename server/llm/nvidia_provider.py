@@ -53,28 +53,18 @@ class NvidiaProvider(LLMProvider):
 
     def __init__(self, model: str, api_key: str) -> None:
         self.model = model
-        self._api_key = api_key
-        self._client: openai.OpenAI | None = None
-
-    def _get_client(self) -> openai.OpenAI:
-        """Return the shared OpenAI client, creating it on first call (lazy singleton)."""
-        if self._client is None:
-            if not self._api_key:
-                raise LLMUnavailableError(
-                    f"NVIDIA NIM API key is not configured (model={self.model!r}). "
-                    "Set HOPMAP_SERVER__LLM__API_KEY in .env."
-                )
-            self._client = openai.OpenAI(
-                base_url=_NVIDIA_BASE_URL,
-                api_key=self._api_key,
-                timeout=_TIMEOUT_SECONDS,
-                max_retries=_SDK_MAX_RETRIES,
-            )
-        return self._client
+        # Singleton client — reuses the underlying HTTP connection pool for
+        # the lifetime of the provider instance (one per server process).
+        self._client = openai.OpenAI(
+            base_url=_NVIDIA_BASE_URL,
+            api_key=api_key,
+            timeout=_TIMEOUT_SECONDS,
+            max_retries=_SDK_MAX_RETRIES,
+        )
 
     def classify(self, context: str, system_prompt: str) -> dict:
         try:
-            response = self._get_client().chat.completions.create(
+            response = self._client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
