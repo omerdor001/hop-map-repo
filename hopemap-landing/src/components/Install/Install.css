@@ -1,0 +1,189 @@
+.install-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+
+  margin-top: 24px;
+}
+
+.install-card {
+  padding: 24px;
+
+  border-radius: 12px;
+
+  background: rgba(255, 255, 255, 0.72);
+
+  border: 1px solid rgba(212, 83, 126, 0.18);
+
+  transition:
+    transform 0.25s,
+    border-color 0.25s,
+    background 0.25s;
+}
+
+.install-card:hover {
+  transform: translateY(-2px);
+
+  border-color: rgba(212, 83, 126, 0.35);
+}
+
+.install-icon {
+  width: 44px;
+  height: 44px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 10px;
+
+  background: rgba(212, 83, 126, 0.1);
+
+  color: #d4537e;
+
+  font-size: 18px;
+
+  margin-bottom: 16px;
+}
+
+.install-card h3 {
+  font-size: 20px;
+  color: #3a0e1e;
+
+  margin-bottom: 8px;
+}
+
+.install-card p {
+  color: #72243e;
+  line-height: 1.6;
+
+  margin-bottom: 18px;
+}
+
+.install-card ol {
+  padding-left: 18px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  margin-bottom: 20px;
+
+  color: #72243e;
+}
+
+.install-card li {
+  font-size: 14px;
+}
+
+.video-thumb {
+  height: 82px;
+
+  margin-bottom: 18px;
+
+  border-radius: 10px;
+
+  background: rgba(212, 83, 126, 0.08);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  color: #993556;
+
+  font-size: 14px;
+}
+
+.video-thumb svg {
+  font-size: 22px;
+}
+
+/* ---------- BUTTONS ---------- */
+
+.install-card button {
+  width: 100%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+
+  border: none;
+
+  background: #d4537e;
+
+  color: white;
+
+  padding: 12px 16px;
+
+  border-radius: 10px;
+
+  font-size: 14px;
+  font-weight: 500;
+
+  cursor: pointer;
+
+  transition:
+    background 0.25s,
+    transform 0.2s;
+}
+
+.install-card button:hover {
+  background: #bf3d68;
+
+  transform: translateY(-1px);
+}
+
+.install-card button svg {
+  font-size: 16px;
+}
+
+/* ---------- DANGER MODE ---------- */
+
+.pg.danger .install-card {
+  background: rgba(20, 0, 0, 0.72);
+
+  border-color: rgba(180, 0, 0, 0.25);
+}
+
+.pg.danger .install-card h3 {
+  color: #ff4444;
+}
+
+.pg.danger .install-card p,
+.pg.danger .install-card li {
+  color: #cc5555;
+}
+
+.pg.danger .install-icon {
+  background: rgba(255, 0, 0, 0.12);
+
+  color: #ff3333;
+}
+
+.pg.danger .video-thumb {
+  background: rgba(255, 0, 0, 0.08);
+
+  color: #cc4444;
+}
+
+.pg.danger .install-card button {
+  background: #cc0000;
+}
+
+.pg.danger .install-card button:hover {
+  background: #e00000;
+}
+
+/* ---------- MOBILE ---------- */
+
+@media (max-width: 768px) {
+  .install-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.install-btn span {
+  display: inline-block;
+}

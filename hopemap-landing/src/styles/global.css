@@ -1,0 +1,31 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: Inter, system-ui, sans-serif;
+
+  background: #fce8f0;
+}
+
+button {
+  font-family: inherit;
+}
+
+a {
+  text-decoration: none;
+}
+
+.section-divider {
+  height: 0.5px;
+
+  margin: 48px 40px 0;
+
+  background: rgba(212, 83, 126, 0.12);
+}
