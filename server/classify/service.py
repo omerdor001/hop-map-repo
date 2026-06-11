@@ -17,6 +17,8 @@ log = logging.getLogger(__name__)
 _RETRYABLE_ERRORS = (LLMUnavailableError, LLMTimeoutError)
 _MAX_RETRIES      = 2
 _RETRY_BASE_DELAY = 0.5  # seconds; actual delays: 0.5 s, 1.0 s
+# asyncio.wait_for ceiling per attempt; keep below SDK timeout (600 s) — threads cannot be cancelled.
+_CLASSIFY_TIMEOUT_SECONDS: float = 120.0
 
 _circuit_breaker = LLMCircuitBreaker(failure_threshold=5, recovery_timeout=60.0)
 
@@ -137,6 +139,17 @@ async def run_classify(context: str) -> dict:
     """
     last_exc: ClassifyError = LLMUnavailableError("all retries exhausted")
 
+    async def _classify_once() -> dict:
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(_llm.classify, context, _CLASSIFY_SYSTEM_PROMPT),
+                timeout=_CLASSIFY_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as exc:
+            raise LLMTimeoutError(
+                f"classify timed out after {_CLASSIFY_TIMEOUT_SECONDS:.0f}s"
+            ) from exc
+
     for attempt in range(_MAX_RETRIES + 1):
         if attempt:
             delay = _RETRY_BASE_DELAY * (2 ** (attempt - 1))  # 0.5 s, 1.0 s
@@ -144,9 +157,7 @@ async def run_classify(context: str) -> dict:
             await asyncio.sleep(delay)
 
         try:
-            return await _circuit_breaker.call(
-                lambda: asyncio.to_thread(_llm.classify, context, _CLASSIFY_SYSTEM_PROMPT)
-            )
+            return await _circuit_breaker.call(_classify_once)
         except LLMCircuitOpenError:
             raise  # Circuit is open — sleeping and retrying won't help
         except _RETRYABLE_ERRORS as exc:

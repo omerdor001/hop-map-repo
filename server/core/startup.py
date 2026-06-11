@@ -32,6 +32,10 @@ _JWT_SECRET_MIN_LEN = 32
 # The env-var operators must set when scaling beyond a single process.
 _REDIS_URL_ENV_VAR = "HOPMAP_SERVER__REDIS__URL"
 
+# LLM providers that require HOPMAP_SERVER__LLM__API_KEY to be non-empty.
+# When adding a new cloud provider to server/llm/__init__.py, add its name here too.
+_CLOUD_PROVIDERS: frozenset[str] = frozenset({"nvidia"})
+
 
 def _check_jwt_secret(jwt_secret: str) -> list[str]:
     violations: list[str] = []
@@ -87,6 +91,18 @@ def _check_multi_worker(cfg: "ServerConfig") -> list[str]:
     ]
 
 
+def _check_llm_config(cfg: "ServerConfig") -> list[str]:
+    """Return a violation if a cloud LLM provider is selected without an API key."""
+    if cfg.llm.provider in _CLOUD_PROVIDERS and not cfg.llm.api_key.get_secret_value().strip():
+        return [
+            f"LLM_PROVIDER is set to '{cfg.llm.provider}' but HOPMAP_SERVER__LLM__API_KEY "
+            "is empty or blank. Cloud providers require an API key. "
+            "Set HOPMAP_SERVER__LLM__API_KEY in .env, or switch to provider='ollama' "
+            "for local inference."
+        ]
+    return []
+
+
 def validate_secrets(cfg: "ServerConfig") -> None:
     """Validate all secrets and deployment constraints required for secure operation.
 
@@ -97,6 +113,7 @@ def validate_secrets(cfg: "ServerConfig") -> None:
     """
     violations = _check_jwt_secret(cfg.auth.jwt_secret)
     violations.extend(_check_multi_worker(cfg))
+    violations.extend(_check_llm_config(cfg))
 
     if not violations:
         return

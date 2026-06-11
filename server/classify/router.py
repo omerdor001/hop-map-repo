@@ -179,13 +179,13 @@ async def agent_classify(body: ClassifyRequest, _child: dict = Depends(get_agent
         )
         return ClassifyResponse(decision="NO", confidence=0, reason="llm_parse_error")
     except LLMUnavailableError as exc:
-        log.error("Ollama unavailable  child=%r: %s", body.child_id, exc, exc_info=True)
+        log.error("LLM unavailable  child=%r: %s", body.child_id, exc, exc_info=True)
         return ClassifyResponse(decision="NO", confidence=0, reason="llm_unavailable")
     except LLMTimeoutError as exc:
-        log.warning("Ollama timed out  child=%r: %s", body.child_id, exc)
+        log.warning("LLM timed out  child=%r: %s", body.child_id, exc)
         return ClassifyResponse(decision="NO", confidence=0, reason="llm_timeout")
     except LLMInferenceError as exc:
-        log.error("Ollama inference error  child=%r: %s", body.child_id, exc, exc_info=True)
+        log.error("LLM inference error  child=%r: %s", body.child_id, exc, exc_info=True)
         return ClassifyResponse(decision="NO", confidence=0, reason="llm_inference_error")
     except ClassifyError as exc:
         log.error(

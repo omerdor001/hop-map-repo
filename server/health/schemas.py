@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class HealthStatus(str, Enum):
@@ -19,8 +19,9 @@ class MongoDBCheck(BaseModel):
     error:           str   | None = None
 
 
-class OllamaCheck(BaseModel):
+class LLMCheck(BaseModel):
     status:          HealthStatus
+    provider:        str
     model:           str
     latency_ms:      float | None = None
     circuit_breaker: str
@@ -35,8 +36,19 @@ class WordsFilterCheck(BaseModel):
 
 class HealthChecks(BaseModel):
     mongodb:      MongoDBCheck
-    ollama:       OllamaCheck
+    llm:          LLMCheck
     words_filter: WordsFilterCheck
+
+    @computed_field
+    @property
+    def ollama(self) -> LLMCheck:
+        """Deprecated alias for ``llm``. Will be removed in a future release.
+
+        The field was renamed from ``ollama`` to ``llm`` to support multiple
+        providers.  Both keys are present in the response during the transition
+        window so existing monitoring dashboards and alerting rules keep working.
+        """
+        return self.llm
 
 
 class ReadinessResponse(BaseModel):

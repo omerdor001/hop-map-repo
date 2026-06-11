@@ -13,8 +13,8 @@
     "words_refresh_interval_seconds": 3600
   },
   "llm": {
-    "provider": "ollama",
-    "model": "qwen2.5:7b"
+    "provider": "nvidia",
+    "model": "moonshotai/kimi-k2.6"
   },
   "auth": {
     "jwt_secret": "change-me-in-production",

@@ -16,9 +16,9 @@ Setup:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import (
     BaseSettings,
     JsonConfigSettingsSource,
@@ -72,10 +72,12 @@ class DatabaseConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM inference backend."""
 
-    # Currently supported: "ollama".
-    # Add a new provider in server/llm/__init__.py, then set this env var.
-    provider: str = Field("ollama", description="LLM backend provider")
+    # Add a new provider: see the instructions in server/llm/__init__.py.
+    provider: Literal["ollama", "nvidia"] = Field("ollama", description="LLM backend provider")
     model: str = Field("qwen2.5:7b", description="Model name passed to the provider")
+    # API key for cloud providers.  Ignored when using Ollama.
+    # Override: HOPMAP_SERVER__LLM__API_KEY=nvapi-...
+    api_key: SecretStr = Field(SecretStr(""), description="API key for cloud LLM providers (e.g. NVIDIA NIM)")
 
 
 class AuthConfig(BaseModel):
