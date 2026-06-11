@@ -86,6 +86,12 @@ class TestTelegramLink:
 
 class TestTelegramWebhook:
 
+    @pytest.fixture(autouse=True)
+    def _clear_webhook_secret(self):
+        """Ensure no ambient webhook_secret from .env interferes with these tests."""
+        with patch.object(config_manager.telegram, "webhook_secret", ""):
+            yield
+
     def _post(self, client, update: dict, secret: str | None = None):
         headers = {"X-Telegram-Bot-Api-Secret-Token": secret} if secret else {}
         return client.post("/api/telegram/webhook", json=update, headers=headers)

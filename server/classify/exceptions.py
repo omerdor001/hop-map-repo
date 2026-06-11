@@ -1,7 +1,8 @@
 """Domain exceptions for the classification pipeline.
 
 All LLM provider errors are translated into one of these types before they
-leave the provider layer, so the router never has to import httpx or ollama.
+leave the provider layer, so the router never has to import httpx, ollama,
+or openai — provider internals stay fully encapsulated.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ class ClassifyError(Exception):
 
 
 class LLMUnavailableError(ClassifyError):
-    """Ollama daemon is unreachable or the requested model is not pulled."""
+    """The LLM provider is unreachable or the requested model is not available."""
 
 
 class LLMTimeoutError(ClassifyError):
@@ -20,7 +21,7 @@ class LLMTimeoutError(ClassifyError):
 
 
 class LLMInferenceError(ClassifyError):
-    """Ollama returned an error response during inference (e.g. 4xx/5xx)."""
+    """The LLM provider returned an error response during inference (e.g. 4xx/5xx)."""
 
 
 class LLMResponseParseError(ClassifyError):

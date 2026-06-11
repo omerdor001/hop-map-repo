@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from config import APP_VERSION
-from health.checks import check_mongodb, check_ollama, check_words_filter
+from health.checks import check_llm, check_mongodb, check_words_filter
 from health.schemas import HealthChecks, HealthStatus, LivenessResponse, ReadinessResponse
 
 # Overwritten by record_startup() in the lifespan; module-load time is the fallback.
@@ -32,12 +32,12 @@ def record_startup() -> None:
 
 def _aggregate(
     mongodb: HealthStatus,
-    ollama:  HealthStatus,
+    llm:     HealthStatus,
     words:   HealthStatus,
 ) -> HealthStatus:
     if mongodb is HealthStatus.UNHEALTHY:
         return HealthStatus.UNHEALTHY
-    if any(s is not HealthStatus.HEALTHY for s in (mongodb, ollama, words)):
+    if any(s is not HealthStatus.HEALTHY for s in (mongodb, llm, words)):
         return HealthStatus.DEGRADED
     return HealthStatus.HEALTHY
 
@@ -60,26 +60,26 @@ async def liveness() -> LivenessResponse:
     response_model=ReadinessResponse,
     summary="Readiness probe",
     description=(
-        "Checks MongoDB, Ollama, and the words filter concurrently. "
+        "Checks MongoDB, the configured LLM provider, and the words filter concurrently. "
         "Returns 200 when the service can handle traffic. "
         "Returns 503 when MongoDB (the critical dependency) is unreachable. "
         "A 200 with status=degraded means the service is up but operating with reduced capability."
     ),
 )
 async def readiness() -> JSONResponse:
-    mongo, ollama_check, words = await asyncio.gather(
+    mongo, llm_check, words = await asyncio.gather(
         check_mongodb(),
-        check_ollama(),
+        check_llm(),
         check_words_filter(),
     )
-    overall = _aggregate(mongo.status, ollama_check.status, words.status)
+    overall = _aggregate(mongo.status, llm_check.status, words.status)
     body = ReadinessResponse(
         status=overall,
         version=APP_VERSION,
         uptime_seconds=round(time.monotonic() - _startup_time, 2),
         checks=HealthChecks(
             mongodb=mongo,
-            ollama=ollama_check,
+            llm=llm_check,
             words_filter=words,
         ),
     )

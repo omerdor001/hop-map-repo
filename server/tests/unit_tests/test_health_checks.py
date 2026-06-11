@@ -18,12 +18,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from health.checks import _CHECK_TIMEOUT, check_mongodb, check_ollama, check_words_filter
+from health.checks import _CHECK_TIMEOUT, check_llm, check_mongodb, check_words_filter
 from health.router import _HTTP_STATUS, _aggregate
 from health.schemas import (
     HealthStatus,
+    LLMCheck,
     MongoDBCheck,
-    OllamaCheck,
     WordsFilterCheck,
 )
 
@@ -32,13 +32,13 @@ from health.schemas import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _healthy_checks() -> tuple[MongoDBCheck, OllamaCheck, WordsFilterCheck]:
+def _healthy_checks() -> tuple[MongoDBCheck, LLMCheck, WordsFilterCheck]:
     mongo = MongoDBCheck(status=HealthStatus.HEALTHY, latency_ms=1.0)
-    oll   = OllamaCheck(status=HealthStatus.HEALTHY, model="qwen2.5:7b",
-                        latency_ms=5.0, circuit_breaker="closed")
+    llm   = LLMCheck(status=HealthStatus.HEALTHY, provider="ollama", model="qwen2.5:7b",
+                     latency_ms=5.0, circuit_breaker="closed")
     words = WordsFilterCheck(status=HealthStatus.HEALTHY, entries=100,
                              refresh_task_alive=True)
-    return mongo, oll, words
+    return mongo, llm, words
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +143,8 @@ class TestCheckMongoDB:
         assert "connection refused" in result.error
 
     async def test_returns_unhealthy_on_timeout(self):
-        with patch("health.checks.asyncio.wait_for", side_effect=asyncio.TimeoutError):
+        with patch("health.checks._ping_db_async", new_callable=AsyncMock,
+                   side_effect=asyncio.TimeoutError):
             result = await check_mongodb()
         assert result.status is HealthStatus.UNHEALTHY
         assert f"{_CHECK_TIMEOUT:.0f}s" in result.error
@@ -197,7 +198,7 @@ class TestCheckMongoDB:
 
 
 # =============================================================================
-# check_ollama()
+# check_llm()
 # =============================================================================
 
 
@@ -205,77 +206,141 @@ _LIST_MODELS = "health.checks._list_ollama_models_async"
 
 
 @pytest.mark.unit
-class TestCheckOllama:
-    """check_ollama covers model-present, model-missing, unreachable, and timeout paths."""
+class TestCheckLLM:
+    """check_llm covers both the ollama and nvidia dispatch paths."""
 
-    async def test_healthy_when_model_present(self, mock_circuit_closed):
+    # ------------------------------------------------------------------
+    # Ollama path
+    # ------------------------------------------------------------------
+
+    async def test_ollama_healthy_when_model_present(self, mock_circuit_closed):
         with patch(_LIST_MODELS, new_callable=AsyncMock, return_value=["qwen2.5:7b", "llama3.2:latest"]):
             with patch("health.checks.config_manager") as cfg:
+                cfg.llm.provider = "ollama"
                 cfg.llm.model = "qwen2.5:7b"
-                result = await check_ollama()
+                result = await check_llm()
         assert result.status is HealthStatus.HEALTHY
+        assert result.provider == "ollama"
         assert result.error is None
         assert result.latency_ms is not None
 
-    async def test_degraded_when_model_missing(self, mock_circuit_closed):
+    async def test_ollama_degraded_when_model_missing(self, mock_circuit_closed):
         with patch(_LIST_MODELS, new_callable=AsyncMock, return_value=["llama3.2:latest"]):
             with patch("health.checks.config_manager") as cfg:
+                cfg.llm.provider = "ollama"
                 cfg.llm.model = "qwen2.5:7b"
-                result = await check_ollama()
+                result = await check_llm()
         assert result.status is HealthStatus.DEGRADED
         assert "qwen2.5:7b" in result.error
         assert "ollama pull" in result.error
 
-    async def test_unhealthy_when_daemon_unreachable(self, mock_circuit_closed):
+    async def test_ollama_unhealthy_when_daemon_unreachable(self, mock_circuit_closed):
         with patch(_LIST_MODELS, new_callable=AsyncMock, side_effect=ConnectionError("no route")):
             with patch("health.checks.config_manager") as cfg:
+                cfg.llm.provider = "ollama"
                 cfg.llm.model = "qwen2.5:7b"
-                result = await check_ollama()
+                result = await check_llm()
         assert result.status is HealthStatus.UNHEALTHY
         assert result.error is not None
 
-    async def test_unhealthy_on_timeout(self, mock_circuit_closed):
-        with patch("health.checks.asyncio.wait_for", side_effect=asyncio.TimeoutError):
+    async def test_ollama_unhealthy_on_timeout(self, mock_circuit_closed):
+        with patch(_LIST_MODELS, new_callable=AsyncMock, side_effect=asyncio.TimeoutError):
             with patch("health.checks.config_manager") as cfg:
+                cfg.llm.provider = "ollama"
                 cfg.llm.model = "qwen2.5:7b"
-                result = await check_ollama()
+                result = await check_llm()
         assert result.status is HealthStatus.UNHEALTHY
         assert f"{_CHECK_TIMEOUT:.0f}s" in result.error
 
-    async def test_circuit_breaker_state_reflected_in_result(self, mock_circuit_open):
+    async def test_ollama_circuit_breaker_open_reflected(self, mock_circuit_open):
         with patch(_LIST_MODELS, new_callable=AsyncMock, return_value=["qwen2.5:7b"]):
             with patch("health.checks.config_manager") as cfg:
+                cfg.llm.provider = "ollama"
                 cfg.llm.model = "qwen2.5:7b"
-                result = await check_ollama()
+                result = await check_llm()
         assert result.circuit_breaker == "open"
 
-    async def test_circuit_breaker_closed_reflected(self, mock_circuit_closed):
+    async def test_ollama_circuit_breaker_closed_reflected(self, mock_circuit_closed):
         with patch(_LIST_MODELS, new_callable=AsyncMock, return_value=["qwen2.5:7b"]):
             with patch("health.checks.config_manager") as cfg:
+                cfg.llm.provider = "ollama"
                 cfg.llm.model = "qwen2.5:7b"
-                result = await check_ollama()
+                result = await check_llm()
         assert result.circuit_breaker == "closed"
 
-    async def test_model_name_in_result(self, mock_circuit_closed):
+    async def test_ollama_model_name_in_result(self, mock_circuit_closed):
         with patch(_LIST_MODELS, new_callable=AsyncMock, return_value=["qwen2.5:7b"]):
             with patch("health.checks.config_manager") as cfg:
+                cfg.llm.provider = "ollama"
                 cfg.llm.model = "qwen2.5:7b"
-                result = await check_ollama()
+                result = await check_llm()
         assert result.model == "qwen2.5:7b"
 
-    async def test_never_raises(self, mock_circuit_closed):
+    async def test_ollama_never_raises(self, mock_circuit_closed):
         with patch(_LIST_MODELS, new_callable=AsyncMock, side_effect=Exception("boom")):
             with patch("health.checks.config_manager") as cfg:
+                cfg.llm.provider = "ollama"
                 cfg.llm.model = "qwen2.5:7b"
-                result = await check_ollama()
+                result = await check_llm()
         assert result.status is HealthStatus.UNHEALTHY
 
-    async def test_empty_model_list_yields_degraded(self, mock_circuit_closed):
+    async def test_ollama_empty_model_list_yields_degraded(self, mock_circuit_closed):
         with patch(_LIST_MODELS, new_callable=AsyncMock, return_value=[]):
             with patch("health.checks.config_manager") as cfg:
+                cfg.llm.provider = "ollama"
                 cfg.llm.model = "qwen2.5:7b"
-                result = await check_ollama()
+                result = await check_llm()
         assert result.status is HealthStatus.DEGRADED
+
+    # ------------------------------------------------------------------
+    # NVIDIA path — no remote ping, circuit breaker is the health signal
+    # ------------------------------------------------------------------
+
+    async def test_nvidia_healthy_when_circuit_closed(self, mock_circuit_closed):
+        with patch("health.checks.config_manager") as cfg:
+            cfg.llm.provider = "nvidia"
+            cfg.llm.model = "moonshotai/kimi-k2"
+            result = await check_llm()
+        assert result.status is HealthStatus.HEALTHY
+        assert result.provider == "nvidia"
+        assert result.latency_ms is None  # no remote ping
+        assert result.error is None
+
+    async def test_nvidia_degraded_when_circuit_half_open(self):
+        with patch("health.checks.get_circuit_breaker_state", return_value="half_open"):
+            with patch("health.checks.config_manager") as cfg:
+                cfg.llm.provider = "nvidia"
+                cfg.llm.model = "moonshotai/kimi-k2"
+                result = await check_llm()
+        assert result.status is HealthStatus.DEGRADED
+        assert result.circuit_breaker == "half_open"
+
+    async def test_nvidia_unhealthy_when_circuit_open(self, mock_circuit_open):
+        with patch("health.checks.config_manager") as cfg:
+            cfg.llm.provider = "nvidia"
+            cfg.llm.model = "moonshotai/kimi-k2"
+            result = await check_llm()
+        assert result.status is HealthStatus.UNHEALTHY
+        assert result.circuit_breaker == "open"
+
+    async def test_nvidia_model_name_in_result(self, mock_circuit_closed):
+        with patch("health.checks.config_manager") as cfg:
+            cfg.llm.provider = "nvidia"
+            cfg.llm.model = "moonshotai/kimi-k2"
+            result = await check_llm()
+        assert result.model == "moonshotai/kimi-k2"
+
+    # ------------------------------------------------------------------
+    # Unknown provider guard
+    # ------------------------------------------------------------------
+
+    async def test_unknown_provider_yields_unhealthy(self, mock_circuit_closed):
+        with patch("health.checks.config_manager") as cfg:
+            cfg.llm.provider = "unknown_provider"
+            cfg.llm.model = "some-model"
+            result = await check_llm()
+        assert result.status is HealthStatus.UNHEALTHY
+        assert "unknown_provider" in result.error
 
 
 # =============================================================================
@@ -339,15 +404,15 @@ class TestAggregate:
         result = _aggregate(HealthStatus.UNHEALTHY, HealthStatus.HEALTHY, HealthStatus.HEALTHY)
         assert result is HealthStatus.UNHEALTHY
 
-    def test_mongodb_unhealthy_overrides_degraded_ollama(self):
+    def test_mongodb_unhealthy_overrides_degraded_llm(self):
         result = _aggregate(HealthStatus.UNHEALTHY, HealthStatus.DEGRADED, HealthStatus.HEALTHY)
         assert result is HealthStatus.UNHEALTHY
 
-    def test_ollama_unhealthy_yields_degraded(self):
+    def test_llm_unhealthy_yields_degraded(self):
         result = _aggregate(HealthStatus.HEALTHY, HealthStatus.UNHEALTHY, HealthStatus.HEALTHY)
         assert result is HealthStatus.DEGRADED
 
-    def test_ollama_degraded_yields_degraded(self):
+    def test_llm_degraded_yields_degraded(self):
         result = _aggregate(HealthStatus.HEALTHY, HealthStatus.DEGRADED, HealthStatus.HEALTHY)
         assert result is HealthStatus.DEGRADED
 
@@ -418,61 +483,61 @@ class TestReadinessEndpoint:
     """GET /health/ready reflects real check results via mocked check functions."""
 
     async def test_returns_200_when_all_healthy(self, health_client):
-        mongo, oll, words = _healthy_checks()
+        mongo, llm, words = _healthy_checks()
         with patch("health.router.check_mongodb",     AsyncMock(return_value=mongo)), \
-             patch("health.router.check_ollama",       AsyncMock(return_value=oll)), \
+             patch("health.router.check_llm",          AsyncMock(return_value=llm)), \
              patch("health.router.check_words_filter", AsyncMock(return_value=words)):
             r = health_client.get("/health/ready")
         assert r.status_code == 200
 
     async def test_body_status_healthy(self, health_client):
-        mongo, oll, words = _healthy_checks()
+        mongo, llm, words = _healthy_checks()
         with patch("health.router.check_mongodb",     AsyncMock(return_value=mongo)), \
-             patch("health.router.check_ollama",       AsyncMock(return_value=oll)), \
+             patch("health.router.check_llm",          AsyncMock(return_value=llm)), \
              patch("health.router.check_words_filter", AsyncMock(return_value=words)):
             r = health_client.get("/health/ready")
         assert r.json()["status"] == "healthy"
 
     async def test_returns_503_when_mongodb_unhealthy(self, health_client):
         mongo = MongoDBCheck(status=HealthStatus.UNHEALTHY, error="down")
-        oll   = OllamaCheck(status=HealthStatus.HEALTHY, model="qwen2.5:7b",
-                            latency_ms=5.0, circuit_breaker="closed")
+        llm   = LLMCheck(status=HealthStatus.HEALTHY, provider="ollama", model="qwen2.5:7b",
+                         latency_ms=5.0, circuit_breaker="closed")
         words = WordsFilterCheck(status=HealthStatus.HEALTHY, entries=100,
                                  refresh_task_alive=True)
         with patch("health.router.check_mongodb",     AsyncMock(return_value=mongo)), \
-             patch("health.router.check_ollama",       AsyncMock(return_value=oll)), \
+             patch("health.router.check_llm",          AsyncMock(return_value=llm)), \
              patch("health.router.check_words_filter", AsyncMock(return_value=words)):
             r = health_client.get("/health/ready")
         assert r.status_code == 503
         assert r.json()["status"] == "unhealthy"
 
-    async def test_returns_200_when_ollama_degraded(self, health_client):
-        """Degraded Ollama → overall degraded → still HTTP 200 (service partially functional)."""
+    async def test_returns_200_when_llm_degraded(self, health_client):
+        """Degraded LLM → overall degraded → still HTTP 200 (service partially functional)."""
         mongo = MongoDBCheck(status=HealthStatus.HEALTHY, latency_ms=1.0)
-        oll   = OllamaCheck(status=HealthStatus.DEGRADED, model="qwen2.5:7b",
-                            latency_ms=5.0, circuit_breaker="closed",
-                            error="model not in local library")
+        llm   = LLMCheck(status=HealthStatus.DEGRADED, provider="ollama", model="qwen2.5:7b",
+                         latency_ms=5.0, circuit_breaker="closed",
+                         error="model not in local library")
         words = WordsFilterCheck(status=HealthStatus.HEALTHY, entries=100,
                                  refresh_task_alive=True)
         with patch("health.router.check_mongodb",     AsyncMock(return_value=mongo)), \
-             patch("health.router.check_ollama",       AsyncMock(return_value=oll)), \
+             patch("health.router.check_llm",          AsyncMock(return_value=llm)), \
              patch("health.router.check_words_filter", AsyncMock(return_value=words)):
             r = health_client.get("/health/ready")
         assert r.status_code == 200
         assert r.json()["status"] == "degraded"
 
     async def test_response_contains_version(self, health_client):
-        mongo, oll, words = _healthy_checks()
+        mongo, llm, words = _healthy_checks()
         with patch("health.router.check_mongodb",     AsyncMock(return_value=mongo)), \
-             patch("health.router.check_ollama",       AsyncMock(return_value=oll)), \
+             patch("health.router.check_llm",          AsyncMock(return_value=llm)), \
              patch("health.router.check_words_filter", AsyncMock(return_value=words)):
             r = health_client.get("/health/ready")
         assert "version" in r.json()
 
     async def test_response_contains_uptime_seconds(self, health_client):
-        mongo, oll, words = _healthy_checks()
+        mongo, llm, words = _healthy_checks()
         with patch("health.router.check_mongodb",     AsyncMock(return_value=mongo)), \
-             patch("health.router.check_ollama",       AsyncMock(return_value=oll)), \
+             patch("health.router.check_llm",          AsyncMock(return_value=llm)), \
              patch("health.router.check_words_filter", AsyncMock(return_value=words)):
             r = health_client.get("/health/ready")
         body = r.json()
@@ -480,28 +545,40 @@ class TestReadinessEndpoint:
         assert body["uptime_seconds"] >= 0
 
     async def test_response_contains_checks_object(self, health_client):
-        mongo, oll, words = _healthy_checks()
+        mongo, llm, words = _healthy_checks()
         with patch("health.router.check_mongodb",     AsyncMock(return_value=mongo)), \
-             patch("health.router.check_ollama",       AsyncMock(return_value=oll)), \
+             patch("health.router.check_llm",          AsyncMock(return_value=llm)), \
              patch("health.router.check_words_filter", AsyncMock(return_value=words)):
             r = health_client.get("/health/ready")
         checks = r.json()["checks"]
         assert "mongodb"      in checks
-        assert "ollama"       in checks
+        assert "llm"          in checks
         assert "words_filter" in checks
+
+    async def test_ollama_deprecation_alias_present_and_equal_to_llm(self, health_client):
+        """checks.ollama must be present and identical to checks.llm during the
+        transition window so existing monitoring dashboards keep working."""
+        mongo, llm, words = _healthy_checks()
+        with patch("health.router.check_mongodb",     AsyncMock(return_value=mongo)), \
+             patch("health.router.check_llm",          AsyncMock(return_value=llm)), \
+             patch("health.router.check_words_filter", AsyncMock(return_value=words)):
+            r = health_client.get("/health/ready")
+        checks = r.json()["checks"]
+        assert "ollama" in checks
+        assert checks["ollama"] == checks["llm"]
 
     async def test_each_check_called_exactly_once_per_request(self, health_client):
         """All three check coroutines must be awaited exactly once per request."""
-        mongo, oll, words = _healthy_checks()
+        mongo, llm, words = _healthy_checks()
         mongo_mock = AsyncMock(return_value=mongo)
-        oll_mock   = AsyncMock(return_value=oll)
+        llm_mock   = AsyncMock(return_value=llm)
         words_mock = AsyncMock(return_value=words)
 
         with patch("health.router.check_mongodb",     mongo_mock), \
-             patch("health.router.check_ollama",       oll_mock), \
+             patch("health.router.check_llm",          llm_mock), \
              patch("health.router.check_words_filter", words_mock):
             health_client.get("/health/ready")
 
         mongo_mock.assert_called_once()
-        oll_mock.assert_called_once()
+        llm_mock.assert_called_once()
         words_mock.assert_called_once()

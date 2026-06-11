@@ -38,7 +38,7 @@ from children.router import router as children_router
 from classify.router import router as classify_router
 from events.router import router as events_router
 from health.router import record_startup, router as health_router
-from me.router import router as me_router
+from profile.router import router as profile_router
 from notifications.router import router as notifications_router
 from platforms.router import router as platforms_router
 from telegram.router import router as telegram_router
@@ -157,6 +157,7 @@ async def lifespan(app: FastAPI):
     classify_service.set_llm(get_provider(
         name=config_manager.llm.provider,
         model=config_manager.llm.model,
+        api_key=config_manager.llm.api_key.get_secret_value(),
     ))
 
     # Ensure MongoDB indexes exist
@@ -208,7 +209,7 @@ app.include_router(auth_router)
 app.include_router(children_router)
 app.include_router(classify_router)
 app.include_router(events_router)
-app.include_router(me_router)
+app.include_router(profile_router)
 app.include_router(notifications_router)
 app.include_router(platforms_router)
 app.include_router(words_router)
