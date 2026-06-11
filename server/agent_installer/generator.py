@@ -282,7 +282,8 @@ Write-Ok "agent_config.json written (agent will activate on first run)."
 
 # -- 6. Install Python packages -----------------------------------------------
 Write-Step "Installing Python packages..."
-& $PythonCmd -m pip install -r "$InstallDir\\requirements.txt" --quiet
+& $PythonCmd -m pip install --upgrade pip --quiet --disable-pip-version-check
+& $PythonCmd -m pip install -r "$InstallDir\\requirements.txt" --quiet --disable-pip-version-check
 if ($LASTEXITCODE -ne 0) {{
     Write-Fail "pip install failed. Check your internet connection and try again."
 }}

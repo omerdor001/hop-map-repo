@@ -21,6 +21,7 @@ from types import SimpleNamespace
 from unittest.mock import call, patch
 
 import pytest
+from pydantic import SecretStr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
@@ -29,6 +30,7 @@ from core.startup import (
     _JWT_SECRET_MIN_LEN,
     _REDIS_URL_ENV_VAR,
     _check_jwt_secret,
+    _check_llm_config,
     _check_multi_worker,
     validate_secrets,
 )
@@ -44,12 +46,15 @@ def _cfg(
     *,
     workers: int = 1,
     redis_url: str = "",
+    llm_provider: str = "ollama",
+    llm_api_key: str = "",
 ) -> SimpleNamespace:
     """Minimal config stub accepted by validate_secrets."""
     return SimpleNamespace(
         auth=SimpleNamespace(jwt_secret=secret),
         network=SimpleNamespace(workers=workers),
         redis=SimpleNamespace(url=redis_url),
+        llm=SimpleNamespace(provider=llm_provider, api_key=SecretStr(llm_api_key)),
         environment=environment,
     )
 
@@ -308,6 +313,62 @@ class TestCheckMultiWorker:
     def test_violation_names_the_worker_count(self):
         (msg,) = _check_multi_worker(_mw_cfg(workers=4))
         assert "4" in msg
+
+
+# =============================================================================
+# _check_llm_config — pure function, no mocks
+# =============================================================================
+
+
+def _llm_cfg(provider: str, api_key: str = "") -> SimpleNamespace:
+    """Minimal stub for _check_llm_config."""
+    return SimpleNamespace(llm=SimpleNamespace(provider=provider, api_key=SecretStr(api_key)))
+
+
+@pytest.mark.unit
+class TestCheckLlmConfig:
+    """_check_llm_config must require an api_key for cloud providers and
+    pass local providers regardless of api_key."""
+
+    # --- no violation ---
+
+    def test_ollama_without_api_key_passes(self):
+        assert _check_llm_config(_llm_cfg("ollama")) == []
+
+    def test_ollama_with_api_key_passes(self):
+        assert _check_llm_config(_llm_cfg("ollama", api_key="ignored")) == []
+
+    def test_nvidia_with_api_key_passes(self):
+        assert _check_llm_config(_llm_cfg("nvidia", api_key="nvapi-abc123")) == []
+
+    # --- violation ---
+
+    def test_nvidia_without_api_key_returns_one_violation(self):
+        assert len(_check_llm_config(_llm_cfg("nvidia"))) == 1
+
+    def test_nvidia_with_spaces_only_key_returns_one_violation(self):
+        assert len(_check_llm_config(_llm_cfg("nvidia", api_key="   "))) == 1
+
+    def test_nvidia_with_tab_only_key_returns_one_violation(self):
+        assert len(_check_llm_config(_llm_cfg("nvidia", api_key="\t"))) == 1
+
+    def test_nvidia_with_newline_only_key_returns_one_violation(self):
+        assert len(_check_llm_config(_llm_cfg("nvidia", api_key="\n"))) == 1
+
+    def test_violation_mentions_provider_name(self):
+        (msg,) = _check_llm_config(_llm_cfg("nvidia"))
+        assert "nvidia" in msg
+
+    def test_violation_mentions_env_var(self):
+        (msg,) = _check_llm_config(_llm_cfg("nvidia"))
+        assert "HOPMAP_SERVER__LLM__API_KEY" in msg
+
+    def test_violations_are_strings(self):
+        violations = _check_llm_config(_llm_cfg("nvidia"))
+        assert all(isinstance(v, str) for v in violations)
+
+    def test_returns_list(self):
+        assert isinstance(_check_llm_config(_llm_cfg("nvidia")), list)
 
     def test_violation_names_the_redis_env_var(self):
         (msg,) = _check_multi_worker(_mw_cfg(workers=2))

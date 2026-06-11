@@ -5,7 +5,7 @@ from auth.dependencies import get_current_user
 from auth.repository import update_max_children, update_telegram_chat_id
 from core.schemas import OkResponse
 
-router = APIRouter(prefix="/api/me", tags=["me"])
+router = APIRouter(prefix="/api/me", tags=["profile"])
 
 
 class UpdatePlanRequest(BaseModel):
