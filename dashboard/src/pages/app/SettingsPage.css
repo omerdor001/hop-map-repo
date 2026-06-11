@@ -1,0 +1,185 @@
+.settings-page {
+  padding: 52px 48px;
+  max-width: 680px;
+}
+
+/* ── Header ── */
+.settings-page-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pink);
+  margin-bottom: 6px;
+}
+
+.settings-page-title {
+  font-size: 28px;
+  font-weight: 600;
+  color: #3a0e1e;
+  margin-bottom: 6px;
+}
+
+.settings-page-subtitle {
+  font-size: 14px;
+  color: #72243e;
+  margin-bottom: 32px;
+  line-height: 1.6;
+}
+
+/* ── Card ── */
+.settings-card {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(212, 83, 126, 0.18);
+  border-radius: 14px;
+  padding: 28px;
+  display: flex;
+  gap: 20px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.settings-card:hover {
+  border-color: rgba(212, 83, 126, 0.32);
+  box-shadow: 0 4px 20px rgba(212, 83, 126, 0.07);
+}
+
+.settings-card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(212, 83, 126, 0.1);
+  color: #0088cc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.settings-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-card-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #3a0e1e;
+  margin-bottom: 6px;
+}
+
+.settings-card-desc {
+  font-size: 14px;
+  color: #72243e;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+/* ── Status badge ── */
+.settings-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 999px;
+  margin-bottom: 16px;
+}
+
+.settings-status--on {
+  background: rgba(42, 157, 63, 0.1);
+  color: #1a7a30;
+  border: 1px solid rgba(42, 157, 63, 0.25);
+}
+
+.settings-status--off {
+  background: rgba(212, 83, 126, 0.07);
+  color: #993556;
+  border: 1px solid rgba(212, 83, 126, 0.2);
+}
+
+.settings-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* ── Error ── */
+.settings-error {
+  background: rgba(192, 17, 42, 0.07);
+  border: 1px solid rgba(192, 17, 42, 0.2);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: #c0112a;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+/* ── Actions ── */
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings-btn-primary,
+.settings-btn-outline,
+.settings-btn-danger {
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s, border-color 0.2s;
+}
+
+.settings-btn-primary {
+  background: var(--pink);
+  color: white;
+  border: none;
+}
+
+.settings-btn-primary:hover:not(:disabled) {
+  background: #bf3d68;
+  transform: translateY(-1px);
+}
+
+.settings-btn-outline {
+  background: transparent;
+  color: #72243e;
+  border: 1px solid rgba(212, 83, 126, 0.35);
+}
+
+.settings-btn-outline:hover:not(:disabled) {
+  border-color: var(--pink);
+  color: #3a0e1e;
+}
+
+.settings-btn-danger {
+  background: transparent;
+  color: #c0112a;
+  border: 1px solid rgba(192, 17, 42, 0.3);
+}
+
+.settings-btn-danger:hover:not(:disabled) {
+  background: rgba(192, 17, 42, 0.07);
+  border-color: rgba(192, 17, 42, 0.5);
+}
+
+.settings-btn-primary:disabled,
+.settings-btn-outline:disabled,
+.settings-btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Hint ── */
+.settings-hint {
+  margin-top: 14px;
+  font-size: 13px;
+  color: #993556;
+  line-height: 1.5;
+}

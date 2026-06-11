@@ -1,0 +1,259 @@
+.kids-page {
+  padding: 52px 48px;
+  max-width: 760px;
+}
+
+/* ── Header ── */
+.kids-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.kids-page-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pink);
+  margin-bottom: 6px;
+}
+
+.kids-page-title {
+  font-size: 28px;
+  font-weight: 600;
+  color: #3a0e1e;
+  margin-bottom: 6px;
+}
+
+.kids-page-subtitle {
+  font-size: 14px;
+  color: #72243e;
+  line-height: 1.6;
+}
+
+.kids-add-btn {
+  flex-shrink: 0;
+  background: var(--pink);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.2s, transform 0.2s;
+  white-space: nowrap;
+}
+
+.kids-add-btn:hover:not(:disabled) {
+  background: #bf3d68;
+  transform: translateY(-1px);
+}
+
+.kids-add-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Limit / error messages ── */
+.kids-limit-msg {
+  font-size: 13px;
+  color: #993556;
+  margin-bottom: 20px;
+}
+
+.kids-page-error {
+  background: rgba(192, 17, 42, 0.07);
+  border: 1px solid rgba(192, 17, 42, 0.2);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #c0112a;
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+
+/* ── Empty state ── */
+.kids-empty {
+  text-align: center;
+  padding: 64px 24px;
+  border-radius: 14px;
+  border: 1px dashed rgba(212, 83, 126, 0.25);
+}
+
+.kids-empty-icon {
+  font-size: 40px;
+  margin-bottom: 14px;
+}
+
+.kids-empty h3 {
+  font-size: 18px;
+  color: #3a0e1e;
+  margin-bottom: 8px;
+}
+
+.kids-empty p {
+  font-size: 14px;
+  color: #72243e;
+  margin-bottom: 20px;
+}
+
+.kids-empty-btn {
+  background: var(--pink);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.kids-empty-btn:hover {
+  background: #bf3d68;
+  transform: translateY(-1px);
+}
+
+/* ── Child list ── */
+.kids-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.kid-card {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(212, 83, 126, 0.18);
+  border-radius: 14px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.kid-card:hover {
+  border-color: rgba(212, 83, 126, 0.32);
+  box-shadow: 0 4px 16px rgba(212, 83, 126, 0.07);
+}
+
+.kid-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(212, 83, 126, 0.1);
+  color: #d4537e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.kid-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.kid-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #3a0e1e;
+  margin-bottom: 2px;
+}
+
+.kid-id {
+  font-size: 12px;
+  color: #993556;
+  font-family: monospace;
+}
+
+.kid-field-error {
+  font-size: 12px;
+  color: #c0112a;
+  margin-top: 4px;
+}
+
+.kid-name-input {
+  font-size: 16px;
+  font-weight: 600;
+  color: #3a0e1e;
+  border: 1px solid rgba(212, 83, 126, 0.4);
+  border-radius: 8px;
+  padding: 4px 10px;
+  outline: none;
+  background: white;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.kid-name-input:focus {
+  border-color: #d4537e;
+  box-shadow: 0 0 0 3px rgba(212, 83, 126, 0.12);
+}
+
+/* ── Card action buttons ── */
+.kid-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.kid-btn-rename,
+.kid-btn-save,
+.kid-btn-cancel {
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.kid-btn-rename {
+  background: transparent;
+  border: 1px solid rgba(212, 83, 126, 0.3);
+  color: #993556;
+}
+
+.kid-btn-rename:hover {
+  border-color: #d4537e;
+  color: #d4537e;
+}
+
+.kid-btn-saved {
+  color: #2a9d3f;
+  border-color: rgba(42, 157, 63, 0.35);
+}
+
+.kid-btn-save {
+  background: var(--pink);
+  color: white;
+  border: none;
+}
+
+.kid-btn-save:hover:not(:disabled) {
+  background: #bf3d68;
+}
+
+.kid-btn-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kid-btn-cancel {
+  background: transparent;
+  border: 1px solid rgba(212, 83, 126, 0.22);
+  color: #72243e;
+}
+
+.kid-btn-cancel:hover {
+  background: rgba(212, 83, 126, 0.05);
+}
