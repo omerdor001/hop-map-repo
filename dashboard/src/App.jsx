@@ -1,50 +1,27 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom"
-import { AuthProvider, useAuth } from "./context/AuthContext"
-import { ChildrenProvider } from "./context/ChildrenContext"
-import Sidebar from "./components/Sidebar"
-import Homepage from "./components/Homepage"
-import Kids from "./components/Kids"
-import Login from "./components/Login"
-import Plan from "./components/Plan"
-import Settings from "./components/Settings"
-import styles from "./App.module.css"
-
-function Dashboard() {
-  return (
-    <ChildrenProvider>
-      <div className={styles.shell}>
-        <Sidebar />
-        <div className={styles.content}>
-          <Routes>
-            <Route path="/" element={<Homepage />} />
-            <Route path="/kids" element={<Kids />} />
-            <Route path="/plan" element={<Plan />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </div>
-      </div>
-    </ChildrenProvider>
-  )
-}
-
-function AppRoutes() {
-  const { accessToken, loading } = useAuth()
-
-  if (loading) {
-    return <div className={styles.loading}>Loading…</div>
-  }
-
-  if (!accessToken) return <Login />
-
-  return <Dashboard />
-}
+import { Routes, Route, Navigate } from "react-router-dom"
+import LandingPage from "./pages/LandingPage"
+import LoginPage from "./pages/LoginPage"
+import RequireAuth from "./components/auth/RequireAuth"
+import AppShell from "./pages/app/AppShell"
+import KidsPage from "./pages/app/KidsPage"
+import SettingsPage from "./pages/app/SettingsPage"
+import ErrorBoundary from "./components/ErrorBoundary"
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<RequireAuth />}>
+        <Route element={<AppShell />}>
+          <Route path="/app" element={<Navigate to="/app/kids" replace />} />
+          <Route path="/app/kids" element={<KidsPage />} />
+          <Route path="/app/settings" element={<SettingsPage />} />
+        </Route>
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+    </ErrorBoundary>
   )
 }
