@@ -24,6 +24,15 @@
     "refresh_cookie_name": "hopmap_refresh",
     "refresh_cookie_secure": false
   },
+  "email": {
+    "enabled": false,
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587,
+    "smtp_secure": false,
+    "from_name": "HopeMap",
+    "reset_token_expiry_minutes": 30,
+    "reset_password_url": "http://localhost:5173"
+  },
   "classify_max_rpm": 30,
   "classify_context_max_chars": 2000,
   "demo_mode": false

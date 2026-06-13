@@ -14,6 +14,7 @@ Integration / E2E tests (server/tests/integration_tests/, server/tests/e2e/)
 
 from __future__ import annotations
 
+import importlib.util as _ilu
 import json
 import sys
 import threading
@@ -34,15 +35,21 @@ for _p in (_SERVER_DIR, _TESTS_DIR):
         sys.path.insert(0, str(_p))
 
 # When the full test suite runs from the repo root, agent/ is collected before
-# server/ (alphabetical order).  Agent test files import agent.py, which does
-# `from config import config_manager`, caching *agent/config.py* in
-# sys.modules['config'].  Evict it here so server/config.py is imported fresh
-# when server modules are first loaded during this conftest's own imports.
+# server/ (alphabetical order).  Agent conftest pre-loads agent/config.py into
+# sys.modules['config'].  Evict it here, then immediately pre-load
+# server/config.py — mirroring what agent conftest does — so every server
+# module import gets the right config_manager regardless of sys.path ordering.
 _cached_config = sys.modules.get("config")
 if _cached_config is not None:
     _cached_file = getattr(_cached_config, "__file__", "") or ""
     if str(_SERVER_DIR) not in _cached_file:
         sys.modules.pop("config", None)
+
+if "config" not in sys.modules:
+    _cfg_spec = _ilu.spec_from_file_location("config", _SERVER_DIR / "config.py")
+    _cfg_mod = _ilu.module_from_spec(_cfg_spec)
+    sys.modules["config"] = _cfg_mod
+    _cfg_spec.loader.exec_module(_cfg_mod)
 
 # Must be module-level so `from __future__ import annotations` doesn't hide
 # it from FastAPI's get_type_hints() when resolving _mock_agent_child's signature.

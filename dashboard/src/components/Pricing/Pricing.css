@@ -1,0 +1,317 @@
+.section {
+  padding: 52px 40px 0;
+}
+
+.section-label {
+  color: var(--pink);
+
+  text-transform: uppercase;
+
+  font-size: 12px;
+
+  letter-spacing: 0.08em;
+
+  margin-bottom: 6px;
+}
+
+.section-title {
+  font-size: 32px;
+
+  color: #3a0e1e;
+
+  margin-bottom: 10px;
+
+  transition: color 0.6s;
+}
+
+.section-subtitle {
+  color: #72243e;
+
+  margin-bottom: 28px;
+
+  transition: color 0.6s;
+}
+
+/* ---------- GRID ---------- */
+
+.pricing-grid {
+  display: grid;
+
+  grid-template-columns: repeat(2, 1fr);
+
+  gap: 18px;
+}
+
+/* ---------- CARD ---------- */
+
+.pricing-card {
+  position: relative;
+
+  padding: 28px;
+
+  border-radius: 14px;
+
+  background: rgba(255, 255, 255, 0.75);
+
+  border: 1px solid rgba(212, 83, 126, 0.18);
+
+  transition:
+    transform 0.25s,
+    border-color 0.25s,
+    box-shadow 0.25s,
+    background 0.25s;
+}
+
+.pricing-card:hover {
+  transform: translateY(-3px);
+
+  border-color: rgba(212, 83, 126, 0.35);
+
+  box-shadow: 0 12px 30px rgba(212, 83, 126, 0.12);
+}
+
+/* ---------- PREMIUM ---------- */
+
+.featured {
+  border: 2px solid var(--pink);
+
+  box-shadow: 0 10px 25px rgba(212, 83, 126, 0.12);
+}
+
+.featured:hover {
+  box-shadow: 0 18px 40px rgba(212, 83, 126, 0.18);
+}
+
+.badge {
+  position: absolute;
+
+  top: -12px;
+  left: 50%;
+
+  transform: translateX(-50%);
+
+  background: var(--pink);
+
+  color: white;
+
+  padding: 5px 14px;
+
+  border-radius: 999px;
+
+  font-size: 11px;
+
+  font-weight: 600;
+}
+
+/* ---------- PLAN ---------- */
+
+.plan-label {
+  color: #993556;
+
+  text-transform: uppercase;
+
+  font-size: 11px;
+
+  letter-spacing: 0.06em;
+}
+
+.plan-name {
+  font-size: 28px;
+
+  margin-top: 4px;
+  margin-bottom: 8px;
+
+  color: #3a0e1e;
+
+  transition: color 0.6s;
+}
+
+.plan-price {
+  font-size: 38px;
+
+  font-weight: 600;
+
+  color: var(--pink);
+
+  margin-bottom: 6px;
+
+  transition: color 0.6s;
+}
+
+.plan-price span {
+  font-size: 15px;
+
+  font-weight: 400;
+}
+
+.plan-note {
+  color: #cc6699;
+
+  margin-bottom: 18px;
+}
+
+.plan-divider {
+  height: 1px;
+
+  background: rgba(212, 83, 126, 0.15);
+
+  margin-bottom: 18px;
+}
+
+/* ---------- FEATURES ---------- */
+
+.features-list {
+  list-style: none;
+
+  display: flex;
+  flex-direction: column;
+
+  gap: 11px;
+
+  margin-bottom: 24px;
+}
+
+.features-list li {
+  color: #4a1528;
+
+  font-size: 14px;
+
+  transition: color 0.6s;
+}
+
+.disabled {
+  opacity: 0.45;
+}
+
+/* ---------- BUTTONS ---------- */
+
+.premium-btn,
+.basic-btn {
+  width: 100%;
+
+  padding: 12px 16px;
+
+  border-radius: 10px;
+
+  cursor: pointer;
+
+  font-size: 14px;
+  font-weight: 500;
+
+  transition:
+    transform 0.2s,
+    background 0.25s,
+    border-color 0.25s;
+}
+
+.premium-btn {
+  border: none;
+
+  background: var(--pink);
+
+  color: white;
+}
+
+.premium-btn:hover {
+  background: #bf3d68;
+
+  transform: translateY(-1px);
+}
+
+.basic-btn {
+  background: transparent;
+
+  border: 1px solid rgba(212, 83, 126, 0.35);
+
+  color: #72243e;
+}
+
+.basic-btn:hover {
+  background: rgba(212, 83, 126, 0.08);
+
+  border-color: rgba(212, 83, 126, 0.6);
+
+  transform: translateY(-1px);
+}
+
+/* ---------- DANGER MODE ---------- */
+
+.pg.danger .section-title {
+  color: #ff3333;
+}
+
+.pg.danger .section-subtitle {
+  color: #cc5555;
+}
+
+.pg.danger .pricing-card {
+  background: rgba(20, 0, 0, 0.75);
+
+  border-color: rgba(180, 0, 0, 0.25);
+}
+
+.pg.danger .pricing-card:hover {
+  border-color: rgba(255, 0, 0, 0.45);
+
+  box-shadow: 0 12px 30px rgba(255, 0, 0, 0.12);
+}
+
+.pg.danger .featured {
+  border-color: #cc0000;
+}
+
+.pg.danger .badge {
+  background: #cc0000;
+}
+
+.pg.danger .plan-name {
+  color: #ff4444;
+}
+
+.pg.danger .plan-price {
+  color: #ff2222;
+}
+
+.pg.danger .features-list li {
+  color: #ff6666;
+}
+
+.pg.danger .plan-note {
+  color: #aa4444;
+}
+
+.pg.danger .premium-btn {
+  background: #cc0000;
+}
+
+.pg.danger .premium-btn:hover {
+  background: #e00000;
+}
+
+.pg.danger .basic-btn {
+  border-color: rgba(255, 0, 0, 0.3);
+
+  color: #ff6666;
+}
+
+.pg.danger .basic-btn:hover {
+  background: rgba(255, 0, 0, 0.08);
+
+  border-color: rgba(255, 0, 0, 0.6);
+}
+
+/* ---------- MOBILE ---------- */
+
+@media (max-width: 768px) {
+  .pricing-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-card {
+    padding: 24px;
+  }
+
+  .plan-price {
+    font-size: 34px;
+  }
+}

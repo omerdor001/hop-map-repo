@@ -1,89 +1,135 @@
-/* ── Design tokens ───────────────────────────────────────────────────────── */
+/* ── Variables ───────────────────────────────────────────────────────────── */
 :root {
-  --color-bg:          #0d0f14;
-  --color-surface:     #111318;
-  --color-border:      #1e2130;
-  --color-row-divider: #1a1d28;
-  --color-text:        #e8eaf0;
-  --color-muted:       #4b5268;
-  --color-subtle:      #3a3f58;
-  --color-indigo:      #6366f1;
-  --color-indigo-light:#818cf8;
-  --color-danger:      #ff4757;
-  --color-success:     #2ed573;
-  --color-warning:     #ffa502;
+  --pink: #d4537e;
+  --pink-light: #fce8f0;
 
-  /* Semantic alpha variants — used by Badge, StatCard, and similar data-driven components */
-  --color-danger-bg:     rgba(255, 71, 87, 0.13);
-  --color-danger-border: rgba(255, 71, 87, 0.2);
-  --color-success-bg:    rgba(46, 213, 115, 0.13);
-  --color-success-border:rgba(46, 213, 115, 0.2);
-  --color-warning-bg:    rgba(255, 165, 2, 0.13);
-  --color-warning-border:rgba(255, 165, 2, 0.2);
+  --dark-red: #cc0000;
+  --danger-bg: #060000;
 
-  /* Password strength meter — 5 levels from weak to strong */
-  --color-strength-0: #ef4444;
-  --color-strength-1: #f97316;
-  --color-strength-2: #eab308;
-  --color-strength-3: #22c55e;
-  --color-strength-4: #16a34a;
+  --text-primary: #3a0e1e;
+  --text-secondary: #72243e;
 
-  /* Plan tier accents */
-  --color-plan-free:      var(--color-muted);
-  --color-plan-starter:   var(--color-indigo);
-  --color-plan-family:    #8b5cf6;
-  --color-plan-unlimited: #ec4899;
+  --border: rgba(212, 83, 126, 0.18);
 
-  --font-sans: 'IBM Plex Sans', sans-serif;
-  --font-mono: 'IBM Plex Mono', monospace;
+  --radius: 12px;
+
+  --safe-bg: #fce8f0;
+  --safe-text: #3a0e1e;
+  --safe-sub: #72243e;
+
+  --danger-main: #ff2222;
+  --danger-secondary: #cc4444;
+  --danger-border: rgba(180, 0, 0, 0.3);
+
+  /* legacy aliases consumed by AddChildModal.module.css */
+  --color-muted: #72243e;
+  --font-mono: Inter, system-ui, sans-serif;
 }
 
-/* ── Box model reset ─────────────────────────────────────────────────────── */
-*, *::before, *::after {
+/* ── Auth loading screen ─────────────────────────────────────────────────── */
+.auth-loading {
+  min-height: 100vh;
+  background: #fce8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #72243e;
+  font-size: 14px;
+}
+
+/* ── Global reset ────────────────────────────────────────────────────────── */
+* {
+  margin: 0;
+  padding: 0;
   box-sizing: border-box;
 }
 
-/* ── Base ────────────────────────────────────────────────────────────────── */
+html {
+  scroll-behavior: smooth;
+}
+
 body {
-  margin: 0;
-  font-family: var(--font-sans);
-  background: var(--color-bg);
-  color: var(--color-text);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  font-family: Inter, system-ui, sans-serif;
+  background: #fce8f0;
 }
 
-#root {
+button {
+  font-family: inherit;
+}
+
+a {
+  text-decoration: none;
+}
+
+.section-divider {
+  height: 0.5px;
+  margin: 48px 40px 0;
+  background: rgba(212, 83, 126, 0.12);
+}
+
+/* ── Keyboard focus ───────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid #d4537e;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Error boundary ───────────────────────────────────────────────────────── */
+.error-boundary {
   min-height: 100vh;
+  background: #fce8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
 }
 
-/* Allow components to own their heading styles completely */
-h1, h2, h3, h4, h5, h6 {
-  margin: 0;
-  font-weight: inherit;
-  font-size: inherit;
+.error-boundary-card {
+  background: white;
+  border: 1px solid rgba(212, 83, 126, 0.2);
+  border-radius: 16px;
+  padding: 40px 36px;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
 }
 
-p { margin: 0; }
-
-/* Buttons and inputs inherit font from body */
-button, input, select, textarea {
-  font: inherit;
+.error-boundary-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #c0112a;
+  margin-bottom: 8px;
 }
 
-/* ── Scrollbar ───────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 3px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2a2d38; border-radius: 2px; }
-
-/* ── Animations ──────────────────────────────────────────────────────────── */
-@keyframes ping {
-  0%   { transform: scale(1);   opacity: 0.7; }
-  70%  { transform: scale(2.2); opacity: 0;   }
-  100% { transform: scale(1);   opacity: 0;   }
+.error-boundary-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: #3a0e1e;
+  margin-bottom: 10px;
 }
 
-@keyframes in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0);   }
+.error-boundary-msg {
+  font-size: 14px;
+  color: #72243e;
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+.error-boundary-btn {
+  background: #d4537e;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.2s;
+}
+
+.error-boundary-btn:hover {
+  background: #bf3d68;
 }

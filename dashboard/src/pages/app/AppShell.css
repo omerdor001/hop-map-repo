@@ -1,0 +1,11 @@
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  background: #fce8f0;
+}
+
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 100vh;
+}

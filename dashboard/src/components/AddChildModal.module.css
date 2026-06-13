@@ -1,6 +1,6 @@
 .panel {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(212, 83, 126, 0.18);
   border-radius: 16px;
   padding: 36px 32px;
   width: 440px;
@@ -9,19 +9,22 @@
 
 /* ── Step 1: creation form ───────────────────────────────────────────────── */
 .header       { margin-bottom: 28px; }
+
 .sectionLabel {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
-  color: var(--color-indigo);
+  color: #d4537e;
   margin-bottom: 6px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
 }
 
 .heading {
   margin: 0;
   font-size: 22px;
-  font-weight: 800;
-  color: #fff;
+  font-weight: 600;
+  color: #3a0e1e;
 }
 
 .subheading {
@@ -44,31 +47,32 @@
   margin-bottom: 6px;
 }
 
-.required { color: #ef4444; }
+.required { color: #c0112a; }
 
 .input {
   width: 100%;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  color: #fff;
+  background: white;
+  border: 1px solid rgba(212, 83, 126, 0.22);
+  border-radius: 10px;
+  color: #3a0e1e;
   font-size: 14px;
   padding: 10px 14px;
   outline: none;
   box-sizing: border-box;
-  transition: border-color 0.15s;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .input:focus {
-  border-color: var(--color-indigo);
+  border-color: #d4537e;
+  box-shadow: 0 0 0 3px rgba(212, 83, 126, 0.12);
 }
 
 .errorBox {
-  background: #1f0f0f;
-  border: 1px solid #7f1d1d;
-  border-radius: 6px;
+  background: rgba(192, 17, 42, 0.07);
+  border: 1px solid rgba(192, 17, 42, 0.25);
+  border-radius: 8px;
   padding: 9px 12px;
-  color: #f87171;
+  color: #c0112a;
   font-size: 13px;
 }
 
@@ -81,19 +85,20 @@
 
 /* ── Shared buttons ──────────────────────────────────────────────────────── */
 .btnPrimary {
-  background: var(--color-indigo);
+  background: #d4537e;
   color: #fff;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 14px;
-  font-weight: 700;
-  padding: 10px 20px;
+  font-weight: 600;
+  padding: 10px 22px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.2s, transform 0.2s;
 }
 
 .btnPrimary:hover:not(:disabled) {
-  background: var(--color-indigo-light);
+  background: #bf3d68;
+  transform: translateY(-1px);
 }
 
 .btnPrimary:disabled {
@@ -104,17 +109,17 @@
 .btnGhost {
   background: transparent;
   color: var(--color-muted);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border: 1px solid rgba(212, 83, 126, 0.25);
+  border-radius: 10px;
   font-size: 14px;
-  padding: 10px 20px;
+  padding: 10px 22px;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
 }
 
 .btnGhost:hover:not(:disabled) {
-  border-color: var(--color-muted);
-  color: var(--color-text);
+  border-color: rgba(212, 83, 126, 0.5);
+  color: #3a0e1e;
 }
 
 .btnGhost:disabled {
@@ -131,7 +136,7 @@
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #22c55e, #16a34a);
+  background: linear-gradient(135deg, #e8749a, #d4537e);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -147,6 +152,7 @@
   color: var(--color-muted);
   margin-bottom: 10px;
   letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .stepItem {
@@ -161,14 +167,14 @@
   height: 22px;
   border-radius: 50%;
   flex-shrink: 0;
-  background: rgba(99, 102, 241, 0.2);
-  border: 1px solid rgba(99, 102, 241, 0.4);
+  background: rgba(212, 83, 126, 0.12);
+  border: 1px solid rgba(212, 83, 126, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 11px;
   font-weight: 700;
-  color: var(--color-indigo-light);
+  color: #d4537e;
 }
 
 .stepText {

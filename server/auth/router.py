@@ -3,7 +3,15 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 from config import config_manager
 from auth.dependencies import get_current_user
-from auth.schemas import AccessTokenResponse, AuthResponse, RegisterRequest, UserResponse
+from auth.schemas import (
+    AccessTokenResponse,
+    AuthResponse,
+    ForgotPasswordRequest,
+    RegisterRequest,
+    ResetPasswordRequest,
+    UserResponse,
+    ValidateResetTokenRequest,
+)
 from auth import service
 from core.rate_limit import limiter
 from core.schemas import OkResponse
@@ -71,3 +79,22 @@ def auth_me(current_user: dict = Depends(get_current_user)) -> UserResponse:
         displayName=current_user.get("displayName", ""),
         createdAt=current_user.get("createdAt", ""),
     )
+
+
+@router.post("/forgot-password", response_model=OkResponse)
+@limiter.limit(config_manager.auth.forgot_password_rate_limit)
+def auth_forgot_password(request: Request, body: ForgotPasswordRequest) -> OkResponse:
+    service.forgot_password(body.email)
+    return OkResponse()
+
+
+@router.post("/validate-reset-token", response_model=OkResponse)
+def auth_validate_reset_token(body: ValidateResetTokenRequest) -> OkResponse:
+    service.validate_reset_token(body.token)
+    return OkResponse()
+
+
+@router.post("/reset-password", response_model=OkResponse)
+def auth_reset_password(body: ResetPasswordRequest) -> OkResponse:
+    service.reset_password(body.token, body.new_password)
+    return OkResponse()

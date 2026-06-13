@@ -43,6 +43,11 @@ def get_children(parent_id: str) -> list[dict]:
     ]
 
 
+def delete_child(child_id: str, parent_id: str) -> bool:
+    result = _col_children().delete_one({"childId": child_id, "parentId": parent_id})
+    return result.deleted_count > 0
+
+
 def get_child_by_id(child_id: str, parent_id: str) -> dict | None:
     return _col_children().find_one({"childId": child_id, "parentId": parent_id}, {"_id": 0})
 

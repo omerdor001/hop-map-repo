@@ -1,0 +1,26 @@
+.footer {
+  margin-top: 48px;
+
+  padding: 20px 40px;
+
+  display: flex;
+  justify-content: space-between;
+
+  border-top: 1px solid rgba(212, 83, 126, 0.15);
+
+  color: #993556;
+  font-size: 14px;
+}
+
+.footer-links {
+  display: flex;
+  gap: 18px;
+}
+
+.footer-links a {
+  color: #993556;
+}
+
+.footer-links a:hover {
+  color: #d4537e;
+}

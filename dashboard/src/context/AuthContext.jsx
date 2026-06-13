@@ -102,6 +102,42 @@ export function AuthProvider({ children }) {
     setUser(null)
   }, [])
 
+  const forgotPassword = useCallback(async (email) => {
+    const res = await fetch("/auth/forgot-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(_extractDetail(body, "Failed to process password reset request"))
+    }
+  }, [])
+
+  const validateResetToken = useCallback(async (token) => {
+    const res = await fetch("/auth/validate-reset-token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(_extractDetail(body, "Invalid or expired reset token"))
+    }
+  }, [])
+
+  const resetPassword = useCallback(async (token, newPassword) => {
+    const res = await fetch("/auth/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, newPassword }),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(_extractDetail(body, "Failed to reset password"))
+    }
+  }, [])
+
   // Authenticated fetch — injects Bearer token and retries once after a 401
   // by attempting a silent token refresh.
   const authFetch = useCallback(async (url, options = {}) => {
@@ -124,7 +160,7 @@ export function AuthProvider({ children }) {
   }, [refresh])
 
   return (
-    <AuthContext.Provider value={{ accessToken, user, loading, login, register, logout, authFetch }}>
+    <AuthContext.Provider value={{ accessToken, user, loading, login, register, logout, authFetch, forgotPassword, validateResetToken, resetPassword }}>
       {children}
     </AuthContext.Provider>
   )

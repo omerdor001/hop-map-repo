@@ -63,6 +63,68 @@ class TestRegisterChild:
         assert children["idem-kid"] == "Original"
 
 
+class TestChildPlanLimit:
+
+    def test_register_fails_with_403_when_limit_reached(self, app_client):
+        """A parent whose plan allows 1 child cannot register a second one."""
+        client, _ = app_client
+
+        from server import app
+        from auth.dependencies import get_current_user
+
+        limited_user = {
+            "id": "test-parent-id",
+            "email": "test@hopmap.test",
+            "displayName": "Test Parent",
+            "maxChildren": 1,
+        }
+
+        async def _limited_user():
+            return limited_user
+
+        original = app.dependency_overrides[get_current_user]
+        app.dependency_overrides[get_current_user] = _limited_user
+        try:
+            resp1 = client.post("/api/children", json={"childId": "limit-kid-1", "childName": "Alice"})
+            assert resp1.status_code == 201
+
+            resp2 = client.post("/api/children", json={"childId": "limit-kid-2", "childName": "Bob"})
+            assert resp2.status_code == 403
+            assert "limit" in resp2.json()["detail"].lower()
+        finally:
+            app.dependency_overrides[get_current_user] = original
+
+    def test_register_succeeds_when_below_limit(self, app_client):
+        """A parent with maxChildren=2 can register up to two children."""
+        client, _ = app_client
+
+        from server import app
+        from auth.dependencies import get_current_user
+
+        two_child_user = {
+            "id": "test-parent-id",
+            "email": "test@hopmap.test",
+            "displayName": "Test Parent",
+            "maxChildren": 2,
+        }
+
+        async def _two_child_user():
+            return two_child_user
+
+        original = app.dependency_overrides[get_current_user]
+        app.dependency_overrides[get_current_user] = _two_child_user
+        try:
+            resp1 = client.post("/api/children", json={"childId": "two-kid-1", "childName": "Alice"})
+            resp2 = client.post("/api/children", json={"childId": "two-kid-2", "childName": "Bob"})
+            assert resp1.status_code == 201
+            assert resp2.status_code == 201
+
+            resp3 = client.post("/api/children", json={"childId": "two-kid-3", "childName": "Carol"})
+            assert resp3.status_code == 403
+        finally:
+            app.dependency_overrides[get_current_user] = original
+
+
 class TestRenameChild:
 
     def test_rename_updates_name(self, app_client):
