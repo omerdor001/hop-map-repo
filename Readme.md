@@ -21,8 +21,9 @@ HopMap monitors a child's Windows gaming session and uses LLM-powered classifica
 - **Classification Server** — FastAPI backend that supports Ollama (local) or NVIDIA NIM (cloud) for URL/context classification, keeping all AI inference off the child's machine
 - **Blocked-Words Filter** — Aho-Corasick multi-pattern filter that intercepts known harmful words and phrases before any LLM call, supporting special characters (`18+`) and Unicode scripts (Hebrew)
 - **Parent Auth** — JWT access tokens (15 min) + httpOnly refresh token cookies (30 days) with bcrypt password hashing, SHA-256 agent token storage, server-side password complexity validation, per-IP rate limiting on auth endpoints, and email-based password reset (SMTP, enumeration-safe)
-- **Parent Dashboard** — React 19 frontend with live SSE event streaming, child profile management (add/delete), alert history, subscriptions, one-click installer download, whitelist/blacklist management, and a "Forgot password?" flow
-- **MongoDB Database** — Persistent storage for hop events, children, auth sessions, notifications, and blocked words
+- **Telegram Bot Alerts** — Parents receive real-time hop alerts via Telegram bot; each parent links their Telegram account through the dashboard settings
+- **Parent Dashboard** — React 19 frontend with child profile management (add/delete), hop alert history, subscriptions, one-click installer download, whitelist/blacklist management, and a "Forgot password?" flow
+- **MongoDB Database** — Persistent storage for hop events, children, auth sessions, and blocked words
 - **Health Checks** — `/health/live` and `/health/ready` endpoints reporting MongoDB, Ollama, and words-filter status
 - **Test Suite** — 736 passing tests across unit, integration, and E2E layers
 
@@ -85,26 +86,28 @@ ollama pull qwen2.5:7b
 ## 📐 Architecture
 
 ```
-┌──────────────────────┐        ┌─────────────────────────────┐        ┌─────────────────┐
-│  Kid's Gaming PC     │        │  HopMap Server (FastAPI :8000)│        │  Parent Browser │
-│                      │        │                              │        │                 │
-│  Desktop Agent       │───────▶│  POST /agent/activate        │        │  React Dashboard│
-│  - Win32 hook        │        │  POST /agent/classify        │        │  GET /stream/   │
-│  - OCR (Tesseract)   │        │  POST /agent/hop/{id}        │───────▶│  {child_id}     │
-│  - Clipboard monitor │        │  GET  /stream/{child_id}     │  SSE   │  JWT auth       │
-│  - Task Scheduler    │        │  REST /auth/*  /api/*        │        │                 │
-└──────────────────────┘        │  GET  /health/live|ready     │        └─────────────────┘
-                                └───────────────┬─────────────┘
-                         ┌──────────────────────┼────────────────────┐
-                         ▼                      ▼                    ▼
-               ┌──────────────────────────┐  ┌──────────────────┐  ┌────────────────┐
-               │  LLM inference           │  │  MongoDB          │  │  Aho-Corasick  │
-               │  Ollama (local)          │  │  - auth/sessions  │  │  Words Filter  │
-               │    or NVIDIA NIM (cloud) │  │  - children       │  │  (pre-LLM)     │
-               └──────────────────────────┘  │  - events         │  └────────────────┘
-                                     │  - notifications  │
-                                     │  - words          │
-                                     └──────────────────┘
+┌──────────────────────┐        ┌──────────────────────────────────────┐
+│  Kid's Gaming PC     │        │  HopMap Server (FastAPI :8000)       │
+│                      │        │                                      │
+│  Desktop Agent       │───────▶│  POST /agent/activate                │
+│  - Win32 hook        │        │  POST /agent/classify                │
+│  - OCR (Tesseract)   │        │  POST /agent/hop/{id}                │
+│  - Clipboard monitor │        │  REST /auth/*  /api/*                │
+│  - Task Scheduler    │        │  GET  /health/live|ready             │
+└──────────────────────┘        └──────────┬───────────────────────────┘
+                          ┌─────────────────┼──────────────────────────┐
+                          ▼                 ▼                          ▼
+               ┌────────────────────┐  ┌───────────────────┐  ┌────────────────────┐
+               │  LLM inference     │  │  MongoDB           │  │  Telegram Bot API  │
+               │  Ollama (local)    │  │  - auth/sessions   │  │  hop alerts →      │
+               │  or NVIDIA NIM     │  │  - children        │  │  parent's phone    │
+               └────────────────────┘  │  - events          │  └────────────────────┘
+                                       │  - words           │
+                  ┌────────────────┐   └───────────────────┘
+                  │  Aho-Corasick  │
+                  │  Words Filter  │
+                  │  (pre-LLM)     │
+                  └────────────────┘
 ```
 
 ### Agent Installation Flow
@@ -138,7 +141,8 @@ Agent (first run)
 Ongoing monitoring
       │  POST /agent/classify  Authorization: Bearer <agentToken>
       │  POST /agent/hop/{childId}  Authorization: Bearer <agentToken>
-      └─────────────────────────────────────────────────────────────▶ SSE push to dashboard
+      └─────────────────────────────────────────────────────────────▶ hop stored in MongoDB
+                                                                       + Telegram alert fired
 ```
 
 ### Component Flow
@@ -146,8 +150,7 @@ Ongoing monitoring
 1. **Agent** detects a candidate URL via OCR screenshot, clipboard poll, or window title
 2. **Agent → Server** sends context snippet to `POST /agent/classify`; server runs the blocked-words filter first (O(n) Aho-Corasick pass), then the local Ollama model if no match, and returns `{ decision, confidence, reason, via }`
 3. **Agent** observes the subsequent app-switch and confirms the hop tier (`app_match`, `title_match`, or `switch_only`)
-4. **Agent → Server** reports the confirmed hop via `POST /agent/hop/{child_id}`; server persists the event to MongoDB and creates a parent notification
-5. **Server → Dashboard** pushes the event over SSE to all connected parent browsers watching that child
+4. **Agent → Server** reports the confirmed hop via `POST /agent/hop/{child_id}`; server persists the event to MongoDB and dispatches a Telegram alert to the parent's phone
 
 ## 📁 Project Structure
 
@@ -200,9 +203,8 @@ hop-map-repo/
 │   │   ├── service.py                  # Per-child rate limiter (30 RPM)
 │   │   ├── circuit_breaker.py          # Async circuit breaker around Ollama calls
 │   │   └── exceptions.py
-│   ├── events/                         # SSE streaming & event history
-│   │   ├── router.py                   # GET /stream/{id}, GET/DELETE /api/events/{id}
-│   │   ├── service.py
+│   ├── events/                         # Hop event storage & retrieval
+│   │   ├── router.py                   # GET/DELETE /api/events/{child_id}
 │   │   └── repository.py
 │   ├── health/                         # Liveness & readiness probes
 │   │   ├── router.py                   # GET /health/live, GET /health/ready
@@ -210,9 +212,9 @@ hop-map-repo/
 │   │   └── schemas.py
 │   ├── profile/                        # Current parent profile shortcut
 │   │   └── router.py                   # GET /api/me, DELETE /api/me/telegram
-│   ├── notifications/                  # Parent alert inbox
-│   │   ├── router.py                   # GET /api/notifications, PATCH …/{id}/read
-│   │   └── repository.py
+│   ├── notifications/                  # Telegram alert dispatch
+│   │   ├── service.py                  # dispatch_hop() — builds message, calls Telegram
+│   │   └── telegram.py                 # Telegram Bot API HTTP client
 │   ├── platforms/                      # Platform→process mappings
 │   │   ├── router.py                   # GET /api/platforms
 │   │   └── service.py                  # Loads platforms_db.xlsx, serves to agents
@@ -239,8 +241,8 @@ hop-map-repo/
 │       ├── conftest.py                 # Session fixtures, mongomock, auth overrides, config collision fix
 │       ├── test_helpers.py
 │       ├── e2e/
-│       │   └── test_full_hop_flow.py   # 11 tests — full classify→hop→events→SSE flow
-│       ├── integration_tests/          # 10 files — endpoint tests via httpx
+│       │   └── test_full_hop_flow.py   # classify→hop→event storage full flow
+│       ├── integration_tests/          # 9 files — endpoint tests via httpx
 │       └── unit_tests/                 # 13 files — filter, auth, DB, LLM, health, rate limiter, circuit breaker, startup
 │
 ├── dashboard/                          # React + Vite parent dashboard (includes landing page)
@@ -269,6 +271,7 @@ hop-map-repo/
 │   ├── package.json
 │   └── vite.config.js
 │
+├── vercel.json                         # Vercel deployment config (@vercel/python builder)
 ├── requirements.txt                    # Combined server + agent dependencies
 ├── conftest.py                         # Root conftest — anchors pytest rootdir
 ├── pytest.ini                          # asyncio_mode = auto
@@ -303,7 +306,7 @@ A lightweight Windows-only sensor that runs on the child's PC. All LLM classific
 
 ### 2. Classification Server (`server/`)
 
-A FastAPI application that runs on the parent's network. Provides endpoints for the agent, real-time SSE for the dashboard, and REST management APIs.
+A FastAPI application that runs on the parent's network. Provides endpoints for the agent, Telegram alert dispatch on confirmed hops, and REST management APIs.
 
 **Classification Flow:**
 
@@ -334,12 +337,9 @@ A FastAPI application that runs on the parent's network. Provides endpoints for 
 | `POST` | `/agent/activate` | — | Exchange one-time setup code → `{ agentToken }` |
 | `GET` | `/agent/me` | Agent token | Confirm child identity from token |
 | `POST` | `/agent/classify` | Agent token | Classify URL + context snippet |
-| `POST` | `/agent/hop/{child_id}` | Agent token | Record confirmed hop event |
-| `GET` | `/stream/{child_id}` | Bearer | SSE stream of live hop events |
+| `POST` | `/agent/hop/{child_id}` | Agent token | Record confirmed hop event → persists to MongoDB + fires Telegram alert |
 | `GET` | `/api/events/{child_id}` | Bearer | Event history (with `?limit=`) |
 | `DELETE` | `/api/events/{child_id}` | Bearer | Clear child's event history |
-| `GET` | `/api/notifications` | Bearer | Parent alert inbox (with `?unread=`) |
-| `PATCH` | `/api/notifications/{id}/read` | Bearer | Mark notification as read |
 | `GET` | `/api/platforms` | — | Platform→process mappings for agents |
 | `GET` | `/api/words` | Bearer | List blocked words |
 | `POST` | `/api/words` | Bearer | Add a blocked word/phrase |
@@ -464,16 +464,15 @@ agent/tests/                     148 tests
 
 server/tests/                  588 tests
 ├── e2e/
-│   └── test_full_hop_flow.py       11 — classify→hop→events→SSE full flow
+│   └── test_full_hop_flow.py        — classify→hop→event storage full flow
 ├── integration_tests/
 │   ├── test_activate_endpoint.py    6 — setup code exchange, single-use, expiry
 │   ├── test_auth_rate_limit.py     11 — per-IP 429 enforcement, Retry-After, IP isolation
 │   ├── test_children_endpoints.py  13 — child CRUD, agent token, plan limits
 │   ├── test_classify_endpoint.py   10 — word_db fast path, LLM path, 18+, Hebrew
-│   ├── test_events_endpoints.py    13 — event history, delete, count, limit validation
-│   ├── test_hop_endpoint.py         6 — hop recording, notification creation
+│   ├── test_events_endpoints.py    10 — event history, delete, isolation, limit
+│   ├── test_hop_endpoint.py         6 — hop recording, event persistence, filtering
 │   ├── test_platforms_endpoint.py   6 — platform map serving
-│   ├── test_sse_stream.py           4 — SSE connection, event delivery
 │   ├── test_telegram_endpoints.py  14 — webhook auth, deep-link, alert dispatch
 │   └── test_words_endpoints.py     11 — words CRUD, duplicate, normalise, reload
 └── unit_tests/
@@ -481,10 +480,9 @@ server/tests/                  588 tests
     ├── test_circuit_breaker.py    54 — LLM circuit breaker open/closed/half-open states
     ├── test_db_circuit_breaker.py 55 — DB circuit breaker states, thread safety, proxy
     ├── test_db_unit.py             73 — connection pool, ping, collection helpers
-    ├── test_events_service.py     27 — listener lifecycle, broadcast, snapshot safety
     ├── test_health_checks.py      57 — MongoDB/Ollama/words-filter health + circuit state
     ├── test_llm_base.py           16 — LLM provider abstraction, classify contract
-    ├── test_notifications.py      11 — notification creation, read-marking, inbox query
+    ├── test_notifications.py      11 — dispatch_hop, Telegram send, message formatting
     ├── test_platforms_loader.py   15 — Excel loader, fallback, synthetic fixtures
     ├── test_rate_limiter.py       24 — per-child RPM enforcement, sweep lifecycle
     ├── test_startup.py            58 — JWT secret validation, dev/prod/staging behaviour

@@ -38,7 +38,6 @@ def db_mod():
     import auth.repository as auth_repo
     import children.repository as child_repo
     import events.repository as event_repo
-    import notifications.repository as notif_repo
     import telegram.repository as tg_repo
     import words.repository as words_repo
 
@@ -46,7 +45,6 @@ def db_mod():
         auth_repo.initialize_indexes()
         child_repo.initialize_indexes()
         event_repo.initialize_indexes()
-        notif_repo.initialize_indexes()
         tg_repo.initialize_indexes()
         words_repo.initialize_indexes()
     except Exception:
@@ -76,10 +74,6 @@ def db_mod():
         create_session        = staticmethod(auth_repo.create_session)
         get_session_by_hash   = staticmethod(auth_repo.get_session_by_hash)
         revoke_session        = staticmethod(auth_repo.revoke_session)
-        # notifications
-        insert_notification   = staticmethod(notif_repo.insert_notification)
-        get_notifications     = staticmethod(notif_repo.get_notifications)
-        mark_notification_read = staticmethod(notif_repo.mark_notification_read)
         # telegram link tokens
         upsert_link_token     = staticmethod(tg_repo.upsert_link_token)
         consume_link_token    = staticmethod(tg_repo.consume_link_token)
@@ -112,11 +106,6 @@ def db_mod():
             return pool.get_collection("sessions")
 
         @staticmethod
-        def _col_notifications():
-            from core.database import pool
-            return pool.get_collection("notifications")
-
-        @staticmethod
         def _col_telegram_tokens():
             from core.database import pool
             return pool.get_collection("telegram_link_tokens")
@@ -142,7 +131,6 @@ def clean_collections(db_mod):
         db_mod._col_words(),
         db_mod._col_users(),
         db_mod._col_sessions(),
-        db_mod._col_notifications(),
         db_mod._col_telegram_tokens(),
     ):
         col.delete_many({})
@@ -442,83 +430,6 @@ class TestSessions:
 
     def test_revoke_nonexistent_session_does_not_raise(self, db_mod):
         db_mod.revoke_session("nonexistent-hash")
-
-
-# ---------------------------------------------------------------------------
-# Notifications
-# ---------------------------------------------------------------------------
-
-class TestInsertNotification:
-
-    def test_returns_string_id(self, db_mod):
-        nid = db_mod.insert_notification(_PARENT_A, "child-1", "evt-1", "hop_detected", "Alice hopped")
-        assert isinstance(nid, str) and len(nid) > 0
-
-    def test_notification_is_unread_by_default(self, db_mod):
-        db_mod.insert_notification(_PARENT_A, "child-1", "evt-1", "hop_detected", "Alice hopped")
-        doc = db_mod._col_notifications().find_one({"parentId": _PARENT_A})
-        assert doc["read"] is False
-
-    def test_notification_stores_correct_fields(self, db_mod):
-        db_mod.insert_notification(_PARENT_A, "child-1", "evt-123", "hop_detected", "Hello")
-        doc = db_mod._col_notifications().find_one({"parentId": _PARENT_A})
-        assert doc["childId"] == "child-1"
-        assert doc["eventId"] == "evt-123"
-        assert doc["type"] == "hop_detected"
-        assert doc["message"] == "Hello"
-
-
-class TestGetNotifications:
-
-    def test_returns_all_notifications_for_parent(self, db_mod):
-        db_mod.insert_notification(_PARENT_A, "c1", "e1", "hop_detected", "msg1")
-        db_mod.insert_notification(_PARENT_A, "c1", "e2", "hop_detected", "msg2")
-        assert len(db_mod.get_notifications(_PARENT_A)) == 2
-
-    def test_does_not_return_other_parents_notifications(self, db_mod):
-        db_mod.insert_notification(_PARENT_A, "c1", "e1", "hop_detected", "for A")
-        db_mod.insert_notification(_PARENT_B, "c2", "e2", "hop_detected", "for B")
-        results = db_mod.get_notifications(_PARENT_A)
-        assert len(results) == 1 and results[0]["message"] == "for A"
-
-    def test_unread_only_excludes_read_notifications(self, db_mod):
-        db_mod.insert_notification(_PARENT_A, "c1", "e1", "hop_detected", "unread")
-        nid = db_mod.insert_notification(_PARENT_A, "c1", "e2", "hop_detected", "read")
-        db_mod.mark_notification_read(nid, _PARENT_A)
-        results = db_mod.get_notifications(_PARENT_A, unread_only=True)
-        assert len(results) == 1 and results[0]["message"] == "unread"
-
-    def test_returns_empty_list_when_no_notifications(self, db_mod):
-        assert db_mod.get_notifications(_PARENT_A) == []
-
-    def test_returned_docs_have_id_not_underscore_id(self, db_mod):
-        db_mod.insert_notification(_PARENT_A, "c1", "e1", "hop_detected", "msg")
-        doc = db_mod.get_notifications(_PARENT_A)[0]
-        assert "id" in doc and "_id" not in doc
-
-    def test_created_at_is_serialised_to_iso_string(self, db_mod):
-        db_mod.insert_notification(_PARENT_A, "c1", "e1", "hop_detected", "msg")
-        doc = db_mod.get_notifications(_PARENT_A)[0]
-        assert isinstance(doc["createdAt"], str)
-
-
-class TestMarkNotificationRead:
-
-    def test_notification_is_read_after_marking(self, db_mod):
-        nid = db_mod.insert_notification(_PARENT_A, "c1", "e1", "hop_detected", "msg")
-        db_mod.mark_notification_read(nid, _PARENT_A)
-        assert db_mod.get_notifications(_PARENT_A, unread_only=True) == []
-
-    def test_returns_true_on_success(self, db_mod):
-        nid = db_mod.insert_notification(_PARENT_A, "c1", "e1", "hop_detected", "msg")
-        assert db_mod.mark_notification_read(nid, _PARENT_A) is True
-
-    def test_returns_false_for_invalid_object_id(self, db_mod):
-        assert db_mod.mark_notification_read("not-an-objectid", _PARENT_A) is False
-
-    def test_returns_false_for_wrong_parent(self, db_mod):
-        nid = db_mod.insert_notification(_PARENT_A, "c1", "e1", "hop_detected", "msg")
-        assert db_mod.mark_notification_read(nid, _PARENT_B) is False
 
 
 # ---------------------------------------------------------------------------

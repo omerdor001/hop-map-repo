@@ -51,7 +51,6 @@ class DatabaseConfig(BaseModel):
     mongo_uri: str = Field("mongodb://localhost:27017", description="MongoDB connection URI")
     db_name: str = Field("hopmap", description="Database name")
     events_collection: str = Field("events", description="Events collection name")
-    rules_collection: str = Field("rules", description="Rules collection name")
     words_collection: str = Field("words", description="Blocked-words collection name")
     words_refresh_interval_seconds: int = Field(
         3600, description="How often (seconds) to reload blocked words from MongoDB", gt=0

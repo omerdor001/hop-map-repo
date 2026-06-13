@@ -5,9 +5,9 @@ Responsibilities are split across feature packages:
   auth/        — parent registration, login, JWT, session management
   children/    — child registration and management
   classify/    — LLM content classification + hop event ingestion
-  events/      — SSE streaming + event history
+  events/      — confirmed hop event history (REST API)
   words/       — blocked-words filter management
-  notifications/ — parent notification inbox
+  notifications/ — Telegram hop alerts
   platforms/   — platform→process mappings served to agents
   core/        — shared database pool, validators
 """
@@ -39,14 +39,12 @@ from classify.router import router as classify_router
 from events.router import router as events_router
 from health.router import record_startup, router as health_router
 from profile.router import router as profile_router
-from notifications.router import router as notifications_router
 from platforms.router import router as platforms_router
 from telegram.router import router as telegram_router
 from words.router import router as words_router
 
 # Services that need lifecycle management
 from classify import service as classify_service
-from events import service as event_service
 from words import service as words_service
 from platforms import service as platforms_service
 
@@ -54,7 +52,6 @@ from platforms import service as platforms_service
 from auth.repository import initialize_indexes as auth_indexes
 from children.repository import initialize_indexes as children_indexes
 from events.repository import initialize_indexes as events_indexes
-from notifications.repository import initialize_indexes as notifications_indexes
 from words.repository import initialize_indexes as words_indexes
 from telegram.repository import initialize_indexes as telegram_indexes
 
@@ -164,7 +161,6 @@ async def lifespan(app: FastAPI):
     auth_indexes()
     children_indexes()
     events_indexes()
-    notifications_indexes()
     words_indexes()
     telegram_indexes()
 
@@ -185,7 +181,6 @@ async def lifespan(app: FastAPI):
     log.info("HopMap server shutting down.")
     await classify_service.stop_sweep_task()
     await words_service.stop_refresh_task()
-    await event_service.shutdown_all()
 
 
 app = FastAPI(title="HopMap API", version=APP_VERSION, lifespan=lifespan)
@@ -210,7 +205,6 @@ app.include_router(children_router)
 app.include_router(classify_router)
 app.include_router(events_router)
 app.include_router(profile_router)
-app.include_router(notifications_router)
 app.include_router(platforms_router)
 app.include_router(words_router)
 app.include_router(telegram_router)

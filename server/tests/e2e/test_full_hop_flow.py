@@ -2,20 +2,16 @@
 
 All external dependencies (MongoDB, Ollama) are mocked at session level by
 the global `_global_test_setup` fixture in tests/conftest.py.
-Tests exercise complete user flows: classify → hop → events → SSE broadcast.
+Tests exercise complete user flows: classify → hop → DB storage → Telegram dispatch.
 """
 from __future__ import annotations
 
-import json
 import sys
-import threading
-import time
 from pathlib import Path
 
 import pytest
-import requests
-import uvicorn
 from starlette.testclient import TestClient
+
 
 _SERVER_DIR = Path(__file__).resolve().parent.parent.parent
 _TESTS_DIR = _SERVER_DIR / "tests"
@@ -23,7 +19,7 @@ for _p in (_SERVER_DIR, _TESTS_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from test_helpers import find_free_port, register_test_child
+from test_helpers import register_test_child
 
 # The app singleton is already configured by _global_test_setup (tests/conftest.py).
 from server import app as _e2e_app
@@ -48,7 +44,6 @@ def _reset_state(_global_test_setup):
     mock_llm = _global_test_setup
 
     import classify.service as _cls_svc
-    import events.service as _evt_svc
     import words.service as _words_svc
     from core.database import pool
     from config import config_manager
@@ -56,7 +51,6 @@ def _reset_state(_global_test_setup):
     # Re-install mock LLM in case a previous test's TestClient lifespan overwrote it.
     _cls_svc.set_llm(mock_llm)
 
-    _evt_svc._sse_queues.clear()
     _cls_svc._classify_call_times.clear()
     mock_llm.reset_mock()
     mock_llm.classify.return_value = {
@@ -80,33 +74,6 @@ def client(_global_test_setup):
         import classify.service as _cls_svc
         _cls_svc.set_llm(mock_llm)
         yield c
-
-
-@pytest.fixture(scope="module")
-def sse_server(_global_test_setup):
-    """Start _e2e_app on a real uvicorn port in a background thread."""
-    port = find_free_port()
-    base_url = f"http://127.0.0.1:{port}"
-    config = uvicorn.Config(_e2e_app, host="127.0.0.1", port=port, log_level="error")
-    server = uvicorn.Server(config)
-
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        try:
-            requests.get(f"{base_url}/health", timeout=1)
-            break
-        except requests.ConnectionError:
-            time.sleep(0.1)
-    else:
-        pytest.fail("E2E SSE test server did not start within 10 seconds.")
-
-    yield base_url
-
-    server.should_exit = True
-    thread.join(timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +117,7 @@ class TestClassifyBlockedWordFlow:
 
 
 # ---------------------------------------------------------------------------
-# Flow 2: Hop ingestion → event retrieval
+# Flow 2: Hop ingestion → event storage → retrieval
 # ---------------------------------------------------------------------------
 
 class TestHopToEventFlow:
@@ -164,9 +131,9 @@ class TestHopToEventFlow:
             "clickConfidence": "app_match",
         })
         register_test_child(child)
-        events = client.get(f"/api/events/{child}").json()
-        assert events["count"] == 1
-        assert events["events"][0]["from"] == "robloxplayerbeta.exe"
+        data = client.get(f"/api/events/{child}").json()
+        assert data["count"] == 1
+        assert data["events"][0]["from"] == "robloxplayerbeta.exe"
 
     def test_events_cleared_after_delete(self, client):
         child = "e2e-clear-kid"
@@ -178,8 +145,7 @@ class TestHopToEventFlow:
         })
         register_test_child(child)
         client.delete(f"/api/events/{child}")
-        events = client.get(f"/api/events/{child}").json()
-        assert events["count"] == 0
+        assert client.get(f"/api/events/{child}").json()["count"] == 0
 
     def test_multi_child_events_isolated(self, client):
         """Events for child A must not appear for child B."""
@@ -213,7 +179,7 @@ class TestChildRegistrationFlow:
 
 
 # ---------------------------------------------------------------------------
-# Flow 4: Rate limiter — 31st classify call returns 429
+# Flow 3: Rate limiter — 31st classify call returns 429
 # ---------------------------------------------------------------------------
 
 class TestRateLimiterFlow:
@@ -242,111 +208,3 @@ class TestRateLimiterFlow:
 
         assert client.post("/agent/classify", json=payload_a).status_code == 429
         assert client.post("/agent/classify", json=payload_b).status_code == 200
-
-
-# ---------------------------------------------------------------------------
-# Flow 5: SSE broadcast — hop event reaches live listener
-# ---------------------------------------------------------------------------
-
-def test_sse_broadcast_after_hop(sse_server):
-    """POST a hop then verify the SSE stream delivers it to a connected listener."""
-    base_url = sse_server
-    child = "e2e-sse-kid"
-    register_test_child(child)
-
-    import events.service as _evt_svc
-    _evt_svc._sse_queues.clear()
-
-    received: list[dict] = []
-    got_two = threading.Event()
-
-    def _listen():
-        with requests.get(
-            f"{base_url}/stream/{child}", stream=True, timeout=10.0
-        ) as r:
-            for raw_line in r.iter_lines():
-                line = raw_line.decode() if isinstance(raw_line, bytes) else raw_line
-                if line.startswith("data:"):
-                    payload = line[5:].strip()
-                    if payload:
-                        try:
-                            received.append(json.loads(payload))
-                        except json.JSONDecodeError:
-                            pass
-                if len(received) >= 2:
-                    got_two.set()
-                    break
-
-    listener = threading.Thread(target=_listen, daemon=True)
-    listener.start()
-
-    time.sleep(0.3)
-
-    requests.post(f"{base_url}/agent/hop/{child}", json={
-        "from": "roblox.exe",
-        "to": "discord.exe",
-        "detection": "confirmed_hop",
-        "clickConfidence": "app_match",
-    })
-
-    got_two.wait(timeout=5)
-    listener.join(timeout=5)
-
-    types = [e.get("type") for e in received]
-    assert "history" in types
-    assert "event" in types
-
-
-def test_sse_multi_child_isolation(sse_server):
-    """Events for child A must not be delivered to child B's SSE stream."""
-    base_url = sse_server
-    child_a = "iso-kid-a"
-    child_b = "iso-kid-b"
-    register_test_child(child_b)
-
-    import events.service as _evt_svc
-    _evt_svc._sse_queues.clear()
-
-    events_b: list[dict] = []
-    history_received = threading.Event()
-
-    def _listen_b():
-        try:
-            with requests.get(
-                f"{base_url}/stream/{child_b}",
-                stream=True,
-                timeout=(5.0, 2.0),
-            ) as r:
-                for raw_line in r.iter_lines():
-                    line = raw_line.decode() if isinstance(raw_line, bytes) else raw_line
-                    if line.startswith("data:"):
-                        payload = line[5:].strip()
-                        if payload:
-                            try:
-                                events_b.append(json.loads(payload))
-                            except json.JSONDecodeError:
-                                pass
-                    if any(e.get("type") == "history" for e in events_b):
-                        history_received.set()
-        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError):
-            pass
-        finally:
-            history_received.set()
-
-    listener = threading.Thread(target=_listen_b, daemon=True)
-    listener.start()
-
-    history_received.wait(timeout=5)
-
-    requests.post(f"{base_url}/agent/hop/{child_a}", json={
-        "from": "game.exe",
-        "to": "discord.exe",
-        "detection": "confirmed_hop",
-        "clickConfidence": "app_match",
-    })
-
-    listener.join(timeout=5)
-
-    for e in events_b:
-        if e.get("type") == "event":
-            pytest.fail(f"child_b received an event intended for child_a: {e}")

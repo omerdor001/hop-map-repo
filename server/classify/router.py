@@ -6,6 +6,7 @@ import secrets
 import zipfile
 from datetime import datetime, timedelta, timezone
 
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
@@ -37,8 +38,6 @@ from classify.schemas import (
 from core.schemas import OkResponse
 from core.validators import validate_child_id
 from events import repository as event_repo
-from events import service as event_service
-from notifications import repository as notif_repo
 from notifications import service as notification_service
 from words.service import check_blocked_words
 
@@ -209,29 +208,21 @@ async def agent_hop(child_id: str, body: HopEventRequest, agent_child: dict = De
 
     alert_reason: str | None = "confirmed_hop" if body.detection == "confirmed_hop" else None
 
-    event = {
-        "childId": child_id, "source": "desktop",
-        "from": body.from_app, "to": body.to_app,
-        "fromTitle": body.from_title, "toTitle": body.to_title,
-        "timestamp": body.timestamp, "blocked": False,
-        "alert": alert_reason is not None, "alertReason": alert_reason,
-        "receivedAt": datetime.now(timezone.utc).isoformat(),
-        "clickConfidence": body.click_confidence,
-        "confirmedTo": body.confirmed_to, "confirmedToTitle": body.confirmed_to_title,
-        "confirmedAt": body.confirmed_at, "context": body.context,
-        "classifyConfidence": body.classify_confidence,
-        "classifyReason": body.classify_reason, "classifySource": body.classify_source,
-    }
-
     if alert_reason is not None and body.click_confidence != "switch_only":
-        event_id = event_repo.insert_event(event)
-        notif_repo.insert_notification(
-            parent_id=agent_child["parentId"],
-            child_id=child_id,
-            event_id=event_id,
-            notif_type="hop_detected",
-            message=f"{agent_child.get('childName', child_id)} hopped to {body.confirmed_to or body.to_app}",
-        )
+        event = {
+            "childId": child_id, "source": "desktop",
+            "from": body.from_app, "to": body.to_app,
+            "fromTitle": body.from_title, "toTitle": body.to_title,
+            "timestamp": body.timestamp, "blocked": False,
+            "alert": True, "alertReason": alert_reason,
+            "receivedAt": datetime.now(timezone.utc).isoformat(),
+            "clickConfidence": body.click_confidence,
+            "confirmedTo": body.confirmed_to, "confirmedToTitle": body.confirmed_to_title,
+            "confirmedAt": body.confirmed_at, "context": body.context,
+            "classifyConfidence": body.classify_confidence,
+            "classifyReason": body.classify_reason, "classifySource": body.classify_source,
+        }
+        event_repo.insert_event(event)
         task = asyncio.create_task(
             notification_service.dispatch_hop(
                 parent_id=agent_child["parentId"],
@@ -242,11 +233,10 @@ async def agent_hop(child_id: str, body: HopEventRequest, agent_child: dict = De
         )
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
-    await event_service.broadcast(child_id, {"type": "event", **event})
 
     log.info(
         "Hop  %r → %r  (%r → %r)  alert=%s",
-        event["from"], event["to"], event["fromTitle"], event["toTitle"],
+        body.from_app, body.to_app, body.from_title, body.to_title,
         alert_reason or "none",
     )
     return OkResponse()
