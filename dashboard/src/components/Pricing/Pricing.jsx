@@ -1,6 +1,9 @@
+import { useNavigate } from "react-router-dom"
 import "./Pricing.css"
 
 function Pricing() {
+  const navigate = useNavigate()
+
   return (
     <section id="pricing" className="section">
       <p className="section-label">Plans</p>
@@ -36,7 +39,7 @@ function Pricing() {
             <li>✓ Priority support</li>
           </ul>
 
-          <button className="premium-btn">Start Premium trial</button>
+          <button className="premium-btn" onClick={() => navigate("/login?tab=register&plan=premium")}>Start Premium trial</button>
         </div>
 
         <div className="pricing-card">
@@ -61,7 +64,7 @@ function Pricing() {
             <li className="disabled">✕ Additional children</li>
           </ul>
 
-          <button className="basic-btn">Get started free</button>
+          <button className="basic-btn" onClick={() => navigate("/login?tab=register")}>Get started free</button>
         </div>
       </div>
     </section>

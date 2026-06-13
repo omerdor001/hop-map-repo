@@ -12,7 +12,6 @@ function Navbar() {
       <ul className="nav-links">
         <li><a href="#how">How it works</a></li>
         <li><a href="#pricing">Pricing</a></li>
-        <li><a href="#install">Install</a></li>
         <li><a href="#contact">Contact</a></li>
       </ul>
 

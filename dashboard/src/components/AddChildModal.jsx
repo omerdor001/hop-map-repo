@@ -53,8 +53,7 @@ function StepForm({ onSuccess, onCancel }) {
   return (
     <div className={styles.panel}>
       <div className={styles.header}>
-        <div className={styles.sectionLabel}>ACCOUNT</div>
-        <h2 className={styles.heading}>Add a child</h2>
+<h2 className={styles.heading}>Add a child</h2>
         <p className={styles.subheading}>
           Register a child profile and get an agent token to install on their PC.
         </p>

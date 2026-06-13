@@ -1,4 +1,4 @@
-import { useTheme } from "../context/ThemeContext"
+import { useTheme } from "../context/useTheme"
 import "../App.css"
 import Navbar from "../components/Navbar/Navbar"
 import Hero from "../components/Hero/Hero"

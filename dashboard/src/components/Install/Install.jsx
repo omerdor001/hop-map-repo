@@ -1,8 +1,6 @@
-import { FaWhatsapp, FaDownload } from "react-icons/fa";
-
-import { BsLaptop, BsPlayCircle, BsQrCode } from "react-icons/bs";
-
-import "./Install.css";
+import { FaWhatsapp, FaDownload } from "react-icons/fa"
+import { BsLaptop, BsPlayCircle, BsQrCode } from "react-icons/bs"
+import "./Install.css"
 
 function Install() {
   return (
@@ -64,7 +62,7 @@ function Install() {
         </div>
       </div>
     </section>
-  );
+  )
 }
 
-export default Install;
+export default Install

@@ -2,10 +2,8 @@ from datetime import datetime, timezone
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from pymongo import DESCENDING
-from pymongo.errors import DuplicateKeyError
-
 from core.database import pool
+from plans import MAX_CHILDREN, Plan
 
 
 def _col_users():
@@ -18,13 +16,14 @@ def _col_sessions():
 
 def create_user(email: str, password_hash: str, display_name: str) -> str:
     result = _col_users().insert_one({
-        "email": email.lower().strip(),
-        "passwordHash": password_hash,
-        "displayName": display_name,
+        "email":         email.lower().strip(),
+        "passwordHash":  password_hash,
+        "displayName":   display_name,
         "emailVerified": False,
-        "maxChildren": 0,
-        "createdAt": datetime.now(timezone.utc),
-        "deletedAt": None,
+        "plan":          Plan.FREE,
+        "maxChildren":   MAX_CHILDREN[Plan.FREE],
+        "createdAt":     datetime.now(timezone.utc),
+        "deletedAt":     None,
     })
     return str(result.inserted_id)
 
@@ -76,11 +75,11 @@ def revoke_session(token_hash: str) -> None:
     )
 
 
-def update_max_children(user_id: str, max_children: int) -> None:
+def update_plan(user_id: str, plan: Plan) -> None:
     try:
         _col_users().update_one(
             {"_id": ObjectId(user_id)},
-            {"$set": {"maxChildren": max_children}},
+            {"$set": {"plan": plan, "maxChildren": MAX_CHILDREN[plan]}},
         )
     except InvalidId:
         pass
@@ -96,7 +95,47 @@ def update_telegram_chat_id(user_id: str, chat_id: str | None) -> None:
         pass
 
 
+def set_reset_token(user_id: str, token: str, expires_at: datetime) -> None:
+    try:
+        _col_users().update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"resetToken": token, "resetTokenExpiry": expires_at}},
+        )
+    except InvalidId:
+        pass
+
+
+def get_user_by_reset_token(token: str) -> dict | None:
+    doc = _col_users().find_one({
+        "resetToken": token,
+        "resetTokenExpiry": {"$gt": datetime.now(timezone.utc)},
+        "deletedAt": None,
+    })
+    if doc:
+        doc["id"] = str(doc.pop("_id"))
+        if isinstance(doc.get("createdAt"), datetime):
+            doc["createdAt"] = doc["createdAt"].isoformat()
+    return doc
+
+
+def apply_password_reset(user_id: str, new_password_hash: str) -> None:
+    """Set new password hash and clear the one-time reset token atomically."""
+    try:
+        _col_users().update_one(
+            {"_id": ObjectId(user_id)},
+            {
+                "$set": {"passwordHash": new_password_hash},
+                "$unset": {"resetToken": "", "resetTokenExpiry": ""},
+            },
+        )
+    except InvalidId:
+        pass
+
+
 def initialize_indexes() -> None:
     _col_users().create_index("email", unique=True)
+    # sparse=True so the index only covers documents that actually have a reset token,
+    # avoiding padding the index with nulls for the majority of users who don't.
+    _col_users().create_index("resetToken", sparse=True)
     _col_sessions().create_index("tokenHash")
     _col_sessions().create_index("expiresAt", expireAfterSeconds=0)

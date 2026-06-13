@@ -8,7 +8,7 @@ function Footer() {
       <div className="footer-links">
         <a href="#">Privacy</a>
         <a href="#">Terms</a>
-        <a href="#">GitHub</a>
+        <a href="https://github.com/omerdor001/hop-map-repo" target="_blank" rel="noreferrer">GitHub</a>
       </div>
     </footer>
   )

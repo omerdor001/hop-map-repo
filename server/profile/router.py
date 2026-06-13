@@ -1,29 +1,30 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from auth.dependencies import get_current_user
-from auth.repository import update_max_children, update_telegram_chat_id
+from auth.repository import update_telegram_chat_id
 from core.schemas import OkResponse
+from plans import MAX_CHILDREN, Plan
 
 router = APIRouter(prefix="/api/me", tags=["profile"])
 
 
-class UpdatePlanRequest(BaseModel):
-    max_children: int = Field(..., alias="maxChildren", ge=0, le=100)
-    model_config = {"populate_by_name": True}
-
-
 class MeResponse(BaseModel):
-    id: str
-    email: str
-    displayName: str = ""
-    maxChildren: int = 0
+    id:             str
+    email:          str
+    displayName:    str        = ""
+    plan:           Plan       = Plan.FREE
+    maxChildren:    int        = MAX_CHILDREN[Plan.FREE]
     telegramChatId: str | None = None
 
 
-class UpdatePlanResponse(BaseModel):
-    ok: bool
-    maxChildren: int
+def _parse_plan(value: object) -> Plan:
+    try:
+        return Plan(value)
+    except (ValueError, TypeError):
+        return Plan.FREE
 
 
 @router.get("", response_model=MeResponse)
@@ -32,15 +33,10 @@ def get_me(current_user: dict = Depends(get_current_user)) -> MeResponse:
         id=current_user["id"],
         email=current_user["email"],
         displayName=current_user.get("displayName", ""),
-        maxChildren=current_user.get("maxChildren", 0),
+        plan=_parse_plan(current_user.get("plan")),
+        maxChildren=current_user.get("maxChildren", MAX_CHILDREN[Plan.FREE]),
         telegramChatId=current_user.get("telegramChatId"),
     )
-
-
-@router.patch("/plan", response_model=UpdatePlanResponse)
-def update_plan(body: UpdatePlanRequest, current_user: dict = Depends(get_current_user)) -> UpdatePlanResponse:
-    update_max_children(current_user["id"], body.max_children)
-    return UpdatePlanResponse(ok=True, maxChildren=body.max_children)
 
 
 @router.delete("/telegram", response_model=OkResponse)

@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react"
-import { useNavigate, Link } from "react-router-dom"
+import { useNavigate, useSearchParams, Link } from "react-router-dom"
 import zxcvbn from "zxcvbn"
+import { BsEye, BsEyeSlash } from "react-icons/bs"
 import { useAuth } from "../context/AuthContext"
+import ForgotPasswordModal from "./ForgotPasswordModal"
 import logo from "../assets/hopemap_logo_v3.svg"
 import "./LoginPage.css"
 
@@ -53,13 +55,17 @@ function PasswordStrengthMeter({ result, errors }) {
 export default function LoginPage() {
   const { login, register, accessToken } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const isPremium = searchParams.get("plan") === "premium"
 
-  const [tab, setTab]                 = useState("login")
+  const [tab, setTab]                 = useState(searchParams.get("tab") === "register" ? "register" : "login")
   const [email, setEmail]             = useState("")
   const [password, setPassword]       = useState("")
   const [displayName, setDisplayName] = useState("")
   const [error, setError]             = useState("")
   const [loading, setLoading]         = useState(false)
+  const [showForgot, setShowForgot]   = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   useEffect(() => {
     if (accessToken) navigate("/app/kids", { replace: true })
@@ -81,10 +87,11 @@ export default function LoginPage() {
     try {
       if (isRegister) {
         await register(email, password, displayName)
+        navigate(isPremium ? "/app/settings?upgrade=1" : "/app/kids", { replace: true })
       } else {
         await login(email, password)
+        navigate("/app/kids", { replace: true })
       }
-      navigate("/app/kids", { replace: true })
     } catch (err) {
       setError(err.message || "Something went wrong.")
     } finally {
@@ -98,6 +105,7 @@ export default function LoginPage() {
     setEmail("")
     setPassword("")
     setDisplayName("")
+    setShowPassword(false)
   }
 
   return (
@@ -152,19 +160,27 @@ export default function LoginPage() {
           </div>
 
           <div className="lp-field">
-            <label className="lp-label">
-              Password
-              {isRegister && <span className="lp-optional"> · min 8 chars, upper, lower, digit, symbol</span>}
-            </label>
-            <input
-              className="lp-input"
-              type="password"
-              autoComplete={isRegister ? "new-password" : "current-password"}
-              placeholder="••••••••"
-              required
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-            />
+            <label className="lp-label">Password</label>
+            <div className="lp-pw-wrap">
+              <input
+                className="lp-input"
+                type={showPassword ? "text" : "password"}
+                autoComplete={isRegister ? "new-password" : "current-password"}
+                placeholder="••••••••"
+                required
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                className="lp-pw-toggle"
+                onClick={() => setShowPassword(p => !p)}
+                disabled={loading}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <BsEyeSlash /> : <BsEye />}
+              </button>
+            </div>
             {isRegister && strengthResult && (
               <PasswordStrengthMeter result={strengthResult} errors={passwordErrors} />
             )}
@@ -177,6 +193,17 @@ export default function LoginPage() {
               ? (isRegister ? "Creating account…" : "Signing in…")
               : (isRegister ? "Create account"    : "Sign in")}
           </button>
+
+          {!isRegister && (
+            <button
+              type="button"
+              className="lp-footer-link"
+              style={{ textAlign: "center", marginTop: 4 }}
+              onClick={() => setShowForgot(true)}
+            >
+              Forgot password?
+            </button>
+          )}
         </form>
 
         <p className="lp-footer">
@@ -189,6 +216,8 @@ export default function LoginPage() {
               </>}
         </p>
       </div>
+
+      {showForgot && <ForgotPasswordModal onClose={() => setShowForgot(false)} />}
     </div>
   )
 }

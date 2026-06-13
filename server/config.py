@@ -94,6 +94,7 @@ class AuthConfig(BaseModel):
     # Override: HOPMAP_SERVER__AUTH__LOGIN_RATE_LIMIT="5/minute"
     login_rate_limit: str = Field("10/minute", description="Max login attempts per IP per window")
     register_rate_limit: str = Field("5/minute", description="Max registration attempts per IP per window")
+    forgot_password_rate_limit: str = Field("5/minute", description="Max forgot-password requests per IP per window")
 
 
 class DataConfig(BaseModel):
@@ -127,6 +128,21 @@ class TelegramConfig(BaseModel):
         return bool(self.bot_token)
 
 
+class EmailConfig(BaseModel):
+    """SMTP email for transactional messages (password reset, etc.)."""
+
+    enabled: bool = Field(False, description="Set True to enable outbound email")
+    smtp_host: str = Field("smtp.gmail.com", description="SMTP server hostname")
+    smtp_port: int = Field(587, description="SMTP server port (587=STARTTLS, 465=SSL)")
+    smtp_secure: bool = Field(False, description="Use SSL from connection start (port 465); False uses STARTTLS (port 587)")
+    smtp_user: str = Field("", description="SMTP username / sender address")
+    smtp_password: SecretStr = Field(SecretStr(""), description="SMTP password or app-specific password")
+    from_address: str = Field("", description="From address for outgoing emails (defaults to smtp_user)")
+    from_name: str = Field("HopeMap", description="Display name for outgoing emails")
+    reset_token_expiry_minutes: int = Field(30, description="Password reset token lifetime in minutes", gt=0)
+    reset_password_url: str = Field("http://localhost:5173", description="Frontend base URL used to build reset links")
+
+
 class RedisConfig(BaseModel):
     """Optional Redis connection for multi-worker deployments.
 
@@ -157,6 +173,7 @@ class ServerConfig(BaseSettings):
     db: DatabaseConfig = Field(default_factory=DatabaseConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    email: EmailConfig = Field(default_factory=EmailConfig)
     data: DataConfig = Field(default_factory=DataConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     redis: RedisConfig = Field(default_factory=RedisConfig)

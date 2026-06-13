@@ -19,6 +19,7 @@ _SERVER_DIR = Path(__file__).resolve().parent.parent.parent
 if str(_SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(_SERVER_DIR))
 
+from bson import ObjectId
 from pydantic import ValidationError
 
 from config import config_manager
@@ -33,8 +34,45 @@ from auth.security import (
     verify_password,
 )
 from auth.dependencies import get_agent_child, get_current_user
+from auth.repository import create_user
+from plans import Plan
 
 _AUTH_CFG = config_manager.auth
+
+
+# ---------------------------------------------------------------------------
+# create_user defaults
+# ---------------------------------------------------------------------------
+
+def _capture_insert(captured: dict):
+    """Return a side-effect for insert_one that records the inserted document."""
+    def _side_effect(doc):
+        captured.update(doc)
+        result = MagicMock()
+        result.inserted_id = ObjectId()
+        return result
+    return _side_effect
+
+
+class TestCreateUserDefaults:
+
+    def test_new_user_defaults_to_free_plan(self):
+        """Registration must store plan=free and maxChildren=1 for every new account."""
+        captured = {}
+        with patch("auth.repository._col_users") as mock_col:
+            mock_col.return_value.insert_one.side_effect = _capture_insert(captured)
+            create_user("brand@new.com", "hashed_pw", "Brand New")
+
+        assert captured.get("plan") == Plan.FREE
+        assert captured.get("maxChildren") == 1
+
+    def test_new_user_email_is_lowercased(self):
+        captured = {}
+        with patch("auth.repository._col_users") as mock_col:
+            mock_col.return_value.insert_one.side_effect = _capture_insert(captured)
+            create_user("Test@Example.COM", "hashed_pw", "Test")
+
+        assert captured.get("email") == "test@example.com"
 
 
 # ---------------------------------------------------------------------------

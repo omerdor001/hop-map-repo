@@ -1,6 +1,5 @@
-import { createContext, useContext, useState } from "react"
-
-const ThemeContext = createContext(null)
+import { useState } from "react"
+import { ThemeContext } from "./themeContext"
 
 export function ThemeProvider({ children }) {
   const [mode, setMode] = useState("safe")
@@ -10,10 +9,4 @@ export function ThemeProvider({ children }) {
       {children}
     </ThemeContext.Provider>
   )
-}
-
-export function useTheme() {
-  const context = useContext(ThemeContext)
-  if (!context) throw new Error("useTheme must be used inside ThemeProvider")
-  return context
 }

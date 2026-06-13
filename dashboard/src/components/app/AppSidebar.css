@@ -1,22 +1,23 @@
 .sidebar {
   width: 220px;
   min-height: 100vh;
-  background: white;
-  border-right: 1px solid rgba(212, 83, 126, 0.15);
+  background: #fce8f0;
+  border-right: 1px solid rgba(212, 83, 126, 0.18);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  transition: background 0.2s, border-color 0.2s;
 }
 
 .sidebar-logo {
   padding: 24px 20px 20px;
-  border-bottom: 1px solid rgba(212, 83, 126, 0.1);
+  border-bottom: 1px solid rgba(212, 83, 126, 0.12);
 }
 
 .sidebar-logo a {
   display: inline-block;
   border-radius: 6px;
-  transition: opacity 0.15s;
+  transition: opacity 0.1s;
 }
 
 .sidebar-logo a:hover {
@@ -42,17 +43,19 @@
   font-size: 14px;
   font-weight: 500;
   text-decoration: none;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.2s, color 0.2s;
 }
 
 .sidebar-link:hover {
-  background: rgba(212, 83, 126, 0.07);
+  background: rgba(255, 255, 255, 0.6);
   color: #3a0e1e;
 }
 
 .sidebar-link--active {
-  background: rgba(212, 83, 126, 0.1);
+  background: rgba(255, 255, 255, 0.85);
   color: #d4537e;
+  border: 1px solid rgba(212, 83, 126, 0.18);
+  box-shadow: 0 2px 8px rgba(212, 83, 126, 0.07);
 }
 
 .sidebar-icon {
@@ -67,7 +70,7 @@
 /* ── Logout ── */
 .sidebar-bottom {
   padding: 12px;
-  border-top: 1px solid rgba(212, 83, 126, 0.1);
+  border-top: 1px solid rgba(212, 83, 126, 0.12);
 }
 
 .sidebar-logout {
@@ -83,10 +86,54 @@
   font-size: 14px;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.2s, color 0.2s;
 }
 
 .sidebar-logout:hover {
-  background: rgba(212, 83, 126, 0.07);
+  background: rgba(255, 255, 255, 0.6);
   color: #c0112a;
+}
+
+/* ── Danger mode ── */
+.pg.danger .sidebar {
+  background: rgba(6, 0, 0, 0.95);
+  border-right-color: rgba(180, 0, 0, 0.35);
+  transition: background 0.4s 0.15s, border-color 0.4s 0.15s;
+}
+
+.pg.danger .sidebar-logo {
+  border-bottom-color: rgba(180, 0, 0, 0.2);
+  transition: border-color 0.4s 0.15s;
+}
+
+.pg.danger .sidebar-link {
+  color: #cc5555;
+  transition: background 0.4s 0.15s, color 0.4s 0.15s;
+}
+
+.pg.danger .sidebar-link:hover {
+  background: rgba(255, 0, 0, 0.08);
+  color: #ff4444;
+}
+
+.pg.danger .sidebar-link--active {
+  background: rgba(255, 0, 0, 0.12);
+  color: #ff3333;
+  border-color: rgba(180, 0, 0, 0.3);
+  box-shadow: none;
+}
+
+.pg.danger .sidebar-bottom {
+  border-top-color: rgba(180, 0, 0, 0.2);
+  transition: border-color 0.4s 0.15s;
+}
+
+.pg.danger .sidebar-logout {
+  color: #cc4444;
+  transition: background 0.4s 0.15s, color 0.4s 0.15s;
+}
+
+.pg.danger .sidebar-logout:hover {
+  background: rgba(255, 0, 0, 0.08);
+  color: #ff4444;
 }
