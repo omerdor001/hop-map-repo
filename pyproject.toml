@@ -1,0 +1,2 @@
+[tool.vercel]
+entrypoint = "server/server.py:app"
