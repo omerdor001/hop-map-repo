@@ -107,6 +107,35 @@
   box-shadow: 0 0 0 3px rgba(212, 83, 126, 0.12);
 }
 
+/* ── Password show/hide toggle ── */
+.lp-pw-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.lp-pw-wrap .lp-input {
+  padding-right: 60px;
+}
+
+.lp-pw-toggle {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: #993556;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.lp-pw-toggle:hover {
+  color: #d4537e;
+}
+
 /* ── Password strength ── */
 .lp-strength {
   margin-top: 6px;

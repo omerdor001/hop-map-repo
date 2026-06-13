@@ -16,10 +16,6 @@ function Hero() {
         that exact moment and alerts you before danger grows.
       </p>
 
-      <div className="hero-buttons">
-        <button className="primary-btn">Start protecting now</button>
-        <button className="secondary-btn">See how it works</button>
-      </div>
     </section>
   )
 }

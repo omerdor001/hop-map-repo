@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { FaDiscord, FaTelegram, FaWhatsapp } from "react-icons/fa"
 import { BsCamera } from "react-icons/bs"
-import { useTheme } from "../../context/ThemeContext"
+import { useTheme } from "../../context/useTheme"
 import "./InteractiveMap.css"
 
 function InteractiveMap() {
@@ -9,17 +9,10 @@ function InteractiveMap() {
   const [matrixChars, setMatrixChars] = useState([])
 
   useEffect(() => {
-    if (mode !== "danger") {
-      setMatrixChars([])
-      return
-    }
+    if (mode !== "danger") return
 
-    const generateMatrix = () => {
-      const chars = Array.from({ length: 800 }, () =>
-        Math.random() > 0.5 ? "1" : "0"
-      )
-      setMatrixChars(chars)
-    }
+    const generateMatrix = () =>
+      setMatrixChars(Array.from({ length: 800 }, () => (Math.random() > 0.5 ? "1" : "0")))
 
     generateMatrix()
     const interval = setInterval(generateMatrix, 700)

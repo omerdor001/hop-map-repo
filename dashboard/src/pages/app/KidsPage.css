@@ -1,6 +1,6 @@
 .kids-page {
   padding: 52px 48px;
-  max-width: 760px;
+  max-width: 960px;
 }
 
 /* ── Header ── */
@@ -9,7 +9,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 32px;
+  margin-bottom: 36px;
 }
 
 .kids-page-label {
@@ -63,7 +63,7 @@
 .kids-limit-msg {
   font-size: 13px;
   color: #993556;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .kids-page-error {
@@ -119,79 +119,144 @@
   transform: translateY(-1px);
 }
 
-/* ── Child list ── */
-.kids-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+/* ── Kids grid ── */
+.kids-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
 }
 
+/* ── Kid card ── */
 .kid-card {
+  position: relative;
+  overflow: hidden;
   background: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(212, 83, 126, 0.18);
   border-radius: 14px;
-  padding: 20px 24px;
+  padding: 24px 20px 20px;
   display: flex;
-  align-items: center;
-  gap: 16px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  flex-direction: column;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s, background 0.2s;
 }
 
 .kid-card:hover {
+  transform: translateY(-2px);
   border-color: rgba(212, 83, 126, 0.32);
-  box-shadow: 0 4px 16px rgba(212, 83, 126, 0.07);
+  box-shadow: 0 6px 24px rgba(212, 83, 126, 0.09);
+}
+
+/* ── Card top: avatar + trash ── */
+.kid-matrix-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  overflow: hidden;
+  background: rgba(6, 0, 0, 0.78);
+  border-radius: 14px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.kid-matrix-overlay span {
+  font-size: 9px;
+  font-family: monospace;
+  color: #ff2222;
+  width: 13px;
+  text-align: center;
+  line-height: 14px;
+  opacity: 0.85;
+}
+
+.kid-card-top {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  position: relative;
+  margin-bottom: 16px;
+  z-index: 2;
 }
 
 .kid-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
   background: rgba(212, 83, 126, 0.1);
   color: #d4537e;
+  border-radius: 999px;
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 700;
+  max-width: 80%;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.2s, color 0.2s;
+}
+
+.kid-btn-trash {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  background: transparent;
+  border: none;
+  color: rgba(212, 83, 126, 0.45);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  font-weight: 700;
-  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
 }
 
+.kid-btn-trash:hover {
+  color: #c0112a;
+  background: rgba(192, 17, 42, 0.07);
+}
+
+/* ── Card body ── */
 .kid-info {
   flex: 1;
-  min-width: 0;
+  text-align: center;
+  margin-bottom: 18px;
+  position: relative;
+  z-index: 2;
 }
 
 .kid-name {
   font-size: 16px;
   font-weight: 600;
   color: #3a0e1e;
-  margin-bottom: 2px;
+  margin-bottom: 5px;
 }
 
 .kid-id {
-  font-size: 12px;
+  font-size: 11px;
   color: #993556;
   font-family: monospace;
+  letter-spacing: 0.02em;
 }
 
 .kid-field-error {
   font-size: 12px;
   color: #c0112a;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 .kid-name-input {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: #3a0e1e;
   border: 1px solid rgba(212, 83, 126, 0.4);
   border-radius: 8px;
-  padding: 4px 10px;
+  padding: 5px 10px;
   outline: none;
   background: white;
   font-family: inherit;
   width: 100%;
   box-sizing: border-box;
+  text-align: center;
 }
 
 .kid-name-input:focus {
@@ -199,22 +264,27 @@
   box-shadow: 0 0 0 3px rgba(212, 83, 126, 0.12);
 }
 
-/* ── Card action buttons ── */
+/* ── Card actions ── */
 .kid-actions {
   display: flex;
   gap: 8px;
-  flex-shrink: 0;
+  border-top: 1px solid rgba(212, 83, 126, 0.1);
+  padding-top: 16px;
+  position: relative;
+  z-index: 2;
 }
 
 .kid-btn-rename,
 .kid-btn-save,
 .kid-btn-cancel {
-  border-radius: 8px;
-  padding: 6px 14px;
+  flex: 1;
+  border-radius: 10px;
+  padding: 9px 14px;
   font-size: 13px;
+  font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background 0.2s, border-color 0.2s, transform 0.15s;
 }
 
 .kid-btn-rename {
@@ -224,13 +294,42 @@
 }
 
 .kid-btn-rename:hover {
-  border-color: #d4537e;
-  color: #d4537e;
+  border-color: var(--pink);
+  color: var(--pink);
+  transform: translateY(-1px);
 }
 
 .kid-btn-saved {
-  color: #2a9d3f;
-  border-color: rgba(42, 157, 63, 0.35);
+  color: var(--pink);
+  border-color: rgba(212, 83, 126, 0.35);
+}
+
+.kid-btn-download {
+  width: 36px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  padding: 9px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgba(212, 83, 126, 0.3);
+  color: #993556;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, border-color 0.2s, color 0.2s, transform 0.15s;
+}
+
+.kid-btn-download:hover:not(:disabled) {
+  border-color: var(--pink);
+  color: var(--pink);
+  transform: translateY(-1px);
+}
+
+.kid-btn-download:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .kid-btn-save {
@@ -241,6 +340,7 @@
 
 .kid-btn-save:hover:not(:disabled) {
   background: #bf3d68;
+  transform: translateY(-1px);
 }
 
 .kid-btn-save:disabled {
@@ -257,3 +357,168 @@
 .kid-btn-cancel:hover {
   background: rgba(212, 83, 126, 0.05);
 }
+
+/* ── Delete confirmation modal ── */
+.kids-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(58, 14, 30, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  backdrop-filter: blur(2px);
+}
+
+.kids-modal {
+  background: white;
+  border-radius: 16px;
+  padding: 32px 28px 24px;
+  max-width: 380px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(58, 14, 30, 0.18);
+}
+
+.kids-modal-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #3a0e1e;
+  margin-bottom: 10px;
+}
+
+.kids-modal-body {
+  font-size: 14px;
+  color: #72243e;
+  line-height: 1.6;
+  margin-bottom: 24px;
+}
+
+.kids-modal-error {
+  font-size: 13px;
+  color: #c0112a;
+  background: rgba(192, 17, 42, 0.07);
+  border: 1px solid rgba(192, 17, 42, 0.2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
+}
+
+.kids-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.kid-btn-cancel-modal {
+  background: transparent;
+  border: 1px solid rgba(212, 83, 126, 0.3);
+  color: #72243e;
+  border-radius: 10px;
+  padding: 9px 20px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.kid-btn-cancel-modal:hover:not(:disabled) {
+  background: rgba(212, 83, 126, 0.05);
+}
+
+.kid-btn-delete-confirm {
+  background: #c0112a;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 20px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.kid-btn-delete-confirm:hover:not(:disabled) {
+  background: #a30e23;
+  transform: translateY(-1px);
+}
+
+.kid-btn-delete-confirm:disabled,
+.kid-btn-cancel-modal:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Per-card danger state (matrix overlay active) ── */
+.kid-card--danger .kid-avatar {
+  background: rgba(180, 0, 0, 0.2);
+  color: #ff5555;
+}
+
+.kid-card--danger .kid-id {
+  color: #cc3333;
+}
+
+.kid-card--danger .kid-actions {
+  border-top-color: rgba(180, 0, 0, 0.3);
+}
+
+.kid-card--danger .kid-btn-rename {
+  border-color: rgba(180, 0, 0, 0.4);
+  color: #ff4444;
+}
+
+.kid-card--danger .kid-btn-trash {
+  color: #ff2222;
+}
+
+/* ── Danger mode (trash hover) ── */
+.pg.danger .kids-page-label  { color: #ff3333; }
+.pg.danger .kids-page-title  { color: #ff4444; }
+.pg.danger .kids-page-subtitle { color: #cc5555; }
+.pg.danger .kids-limit-msg   { color: #cc4444; }
+
+.pg.danger .kids-add-btn {
+  background: #cc0000;
+}
+.pg.danger .kids-add-btn:hover:not(:disabled) {
+  background: #e00000;
+}
+
+.pg.danger .kid-card {
+  background: rgba(20, 0, 0, 0.82);
+  border-color: rgba(180, 0, 0, 0.3);
+}
+.pg.danger .kid-card:hover {
+  border-color: rgba(220, 0, 0, 0.5);
+  box-shadow: 0 6px 24px rgba(180, 0, 0, 0.2);
+}
+
+.pg.danger .kid-avatar {
+  background: rgba(255, 0, 0, 0.12);
+  color: #ff3333;
+}
+.pg.danger .kid-id    { color: #cc4444; }
+
+.pg.danger .kid-actions {
+  border-top-color: rgba(180, 0, 0, 0.2);
+}
+
+.pg.danger .kid-btn-rename {
+  border-color: rgba(180, 0, 0, 0.35);
+  color: #cc4444;
+}
+.pg.danger .kid-btn-rename:hover {
+  border-color: #ff3333;
+  color: #ff3333;
+}
+
+.pg.danger .kid-btn-trash {
+  color: #ff2222;
+}
+
+.pg.danger .kids-empty {
+  border-color: rgba(180, 0, 0, 0.25);
+}
+.pg.danger .kids-empty h3 { color: #ff4444; }
+.pg.danger .kids-empty p  { color: #cc5555; }

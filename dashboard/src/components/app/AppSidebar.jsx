@@ -16,7 +16,7 @@ export default function AppSidebar() {
     <aside className="sidebar">
       <div className="sidebar-logo">
         <Link to="/" aria-label="Go to home page">
-          <img src={logo} alt="HopMap" width={120} />
+          <img src={logo} alt="HopMap" width={140} />
         </Link>
       </div>
 
@@ -30,11 +30,19 @@ export default function AppSidebar() {
         </NavLink>
 
         <NavLink
-          to="/app/settings"
+          to="/app/alerts"
           className={({ isActive }) => `sidebar-link${isActive ? " sidebar-link--active" : ""}`}
         >
-          <span className="sidebar-icon" aria-hidden="true">⚙</span>
-          Settings
+          <span className="sidebar-icon" aria-hidden="true">🔔</span>
+          Alerts
+        </NavLink>
+
+        <NavLink
+          to="/app/subscription"
+          className={({ isActive }) => `sidebar-link${isActive ? " sidebar-link--active" : ""}`}
+        >
+          <span className="sidebar-icon" aria-hidden="true">👑</span>
+          Subscription
         </NavLink>
       </nav>
 

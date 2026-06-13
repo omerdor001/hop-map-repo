@@ -11,6 +11,7 @@ from children.schemas import (
     RenameChildResponse,
 )
 from children import service as children_service
+from core.schemas import OkResponse
 from core.validators import validate_child_id
 
 router = APIRouter(prefix="/api/children", tags=["children"])
@@ -35,3 +36,10 @@ def rename_child(child_id: str, body: RenameChildRequest, current_user: dict = D
     validate_child_id(child_id)
     result = children_service.update_child_name(child_id, body.child_name, current_user["id"])
     return RenameChildResponse(**result)
+
+
+@router.delete("/{child_id}", response_model=OkResponse)
+def delete_child(child_id: str, current_user: dict = Depends(get_current_user)) -> OkResponse:
+    validate_child_id(child_id)
+    children_service.remove_child(child_id, current_user["id"])
+    return OkResponse()

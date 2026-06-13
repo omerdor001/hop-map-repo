@@ -8,8 +8,8 @@ function Features() {
       <div className="feature-item">
         <div className="feature-icon"><BsEyeSlash /></div>
         <div>
-          <h3>No message reading</h3>
-          <p>Detects patterns, never reads private chats</p>
+          <h3>Catches every hop</h3>
+          <p>Spots the moment your child switches apps</p>
         </div>
       </div>
 
@@ -33,7 +33,7 @@ function Features() {
         <div className="feature-icon"><FaLock /></div>
         <div>
           <h3>Privacy-first</h3>
-          <p>Data stays on device</p>
+          <p>Only the hop is saved — nothing else</p>
         </div>
       </div>
     </section>

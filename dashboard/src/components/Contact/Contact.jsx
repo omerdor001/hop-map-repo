@@ -15,7 +15,7 @@ function Contact() {
 
           <div className="contact-row">
             <BsEnvelope />
-            theggirls@hopemap.io
+            HopeMapTeam@gmail.com
           </div>
 
           <div className="contact-row">

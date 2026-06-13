@@ -5,7 +5,7 @@ import uuid
 from fastapi import HTTPException
 
 from auth.security import hash_token
-from children.repository import count_children, get_child_by_id, register_child, rename_child
+from children.repository import count_children, delete_child, register_child, rename_child
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +20,13 @@ def add_child(child_id: str | None, child_name: str, parent_id: str, max_childre
     register_child(resolved_id, name, parent_id, token_hash, raw_agent_token[:8])
     log.info("Child registered  id=%r  name=%r  parent=%r", resolved_id, name, parent_id)
     return {"ok": True, "childId": resolved_id, "childName": name, "agentToken": raw_agent_token}
+
+
+def remove_child(child_id: str, parent_id: str) -> None:
+    deleted = delete_child(child_id, parent_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Child not found.")
+    log.info("Child deleted  id=%r  parent=%r", child_id, parent_id)
 
 
 def update_child_name(child_id: str, child_name: str, parent_id: str) -> dict:
