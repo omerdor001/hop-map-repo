@@ -29,7 +29,7 @@ class TestHopEndpointIngestion:
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
-    def test_hop_event_persisted_in_db(self, app_client):
+    def test_confirmed_hop_persisted_in_db(self, app_client):
         """A confirmed_hop with non-switch_only confidence must be stored."""
         client, _ = app_client
         body = {
@@ -44,42 +44,36 @@ class TestHopEndpointIngestion:
         client.post(f"/agent/hop/{CHILD_ID}", json=body)
 
         register_test_child(CHILD_ID)
-        events_resp = client.get(f"/api/events/{CHILD_ID}")
-        assert events_resp.status_code == 200
-        data = events_resp.json()
+        resp = client.get(f"/api/events/{CHILD_ID}")
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["count"] >= 1
         assert any(e["from"] == "robloxplayerbeta.exe" for e in data["events"])
 
     def test_switch_only_hop_not_persisted(self, app_client):
-        """switch_only clickConfidence should NOT persist the event to DB."""
+        """switch_only clickConfidence must not persist to DB."""
         client, _ = app_client
         child = "switch-only-child"
-        body = {
+        client.post(f"/agent/hop/{child}", json={
             "from": "robloxplayerbeta.exe",
             "to": "chrome.exe",
             "detection": "confirmed_hop",
             "clickConfidence": "switch_only",
-        }
-        client.post(f"/agent/hop/{child}", json=body)
-
+        })
         register_test_child(child)
-        events_resp = client.get(f"/api/events/{child}")
-        assert events_resp.json()["count"] == 0
+        assert client.get(f"/api/events/{child}").json()["count"] == 0
 
     def test_non_confirmed_hop_not_persisted(self, app_client):
-        """Events without detection=confirmed_hop are not stored."""
+        """Events without detection=confirmed_hop must not be stored."""
         client, _ = app_client
         child = "non-confirmed-child"
-        body = {
+        client.post(f"/agent/hop/{child}", json={
             "from": "robloxplayerbeta.exe",
             "to": "chrome.exe",
             "clickConfidence": "title_match",
-        }
-        client.post(f"/agent/hop/{child}", json=body)
-
+        })
         register_test_child(child)
-        events_resp = client.get(f"/api/events/{child}")
-        assert events_resp.json()["count"] == 0
+        assert client.get(f"/api/events/{child}").json()["count"] == 0
 
     def test_invalid_child_id_returns_400(self, app_client):
         client, _ = app_client

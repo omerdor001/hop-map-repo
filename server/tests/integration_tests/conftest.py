@@ -32,10 +32,8 @@ def app_client(_app, _global_test_setup):
     mock_llm = _global_test_setup
 
     import classify.service as cls_svc
-    import events.service as _evt_svc
     import words.service as words_svc
 
-    _evt_svc._sse_queues.clear()
     cls_svc._classify_call_times.clear()
     mock_llm.reset_mock()
 

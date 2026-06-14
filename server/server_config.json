@@ -8,7 +8,6 @@
   "db": {
     "db_name": "hopmap",
     "events_collection": "events",
-    "rules_collection": "rules",
     "words_collection": "words",
     "words_refresh_interval_seconds": 3600
   },

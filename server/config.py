@@ -42,6 +42,14 @@ class NetworkConfig(BaseModel):
     # Override: HOPMAP_SERVER__NETWORK__WORKERS=4
     workers: int = Field(1, description="Number of uvicorn worker processes", ge=1)
 
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, v: object) -> object:
+        """Accept a comma-separated string from env vars in addition to a JSON array."""
+        if isinstance(v, str):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
+
 
 class DatabaseConfig(BaseModel):
     """MongoDB connection."""
@@ -51,7 +59,6 @@ class DatabaseConfig(BaseModel):
     mongo_uri: str = Field("mongodb://localhost:27017", description="MongoDB connection URI")
     db_name: str = Field("hopmap", description="Database name")
     events_collection: str = Field("events", description="Events collection name")
-    rules_collection: str = Field("rules", description="Rules collection name")
     words_collection: str = Field("words", description="Blocked-words collection name")
     words_refresh_interval_seconds: int = Field(
         3600, description="How often (seconds) to reload blocked words from MongoDB", gt=0

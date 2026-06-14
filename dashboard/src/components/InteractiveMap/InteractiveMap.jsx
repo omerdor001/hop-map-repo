@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { FaDiscord, FaTelegram, FaWhatsapp } from "react-icons/fa"
 import { BsCamera } from "react-icons/bs"
-import { useTheme } from "../../context/useTheme"
+import { useTheme } from "../../context/ThemeContext"
 import "./InteractiveMap.css"
 
 function InteractiveMap() {

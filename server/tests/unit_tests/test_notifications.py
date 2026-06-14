@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch  # AsyncMock kept for dispatch_hop mocks
 
 import pytest
 
@@ -21,7 +21,7 @@ from notifications.service import dispatch_hop
 # ---------------------------------------------------------------------------
 
 def _http_mock(status_code: int, body: dict | None = None):
-    """Return (async-context-manager, inner-http-client) with a canned response.
+    """Return (sync-context-manager, inner-http-client) with a canned response.
 
     Both resp.content and resp.json() are derived from the same dict so mocked
     behaviour is internally consistent.
@@ -32,10 +32,10 @@ def _http_mock(status_code: int, body: dict | None = None):
     resp.json.return_value = body
     resp.text = json.dumps(body)
     http = MagicMock()
-    http.post = AsyncMock(return_value=resp)
+    http.post = MagicMock(return_value=resp)
     cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=http)
-    cm.__aexit__ = AsyncMock(return_value=None)
+    cm.__enter__ = MagicMock(return_value=http)
+    cm.__exit__ = MagicMock(return_value=None)
     return cm, http
 
 
@@ -58,7 +58,7 @@ class TestSendMessage:
     async def test_posts_to_correct_telegram_url(self):
         cm, http = _http_mock(200)
         with patch("notifications.telegram.config_manager") as cfg, \
-             patch("httpx.AsyncClient", return_value=cm):
+             patch("httpx.Client", return_value=cm):
             cfg.telegram.bot_token = "ABC123"
             await send_message(chat_id=42, text="hello")
         url = http.post.call_args[0][0]
@@ -67,7 +67,7 @@ class TestSendMessage:
     async def test_sends_chat_id_and_text_in_payload(self):
         cm, http = _http_mock(200)
         with patch("notifications.telegram.config_manager") as cfg, \
-             patch("httpx.AsyncClient", return_value=cm):
+             patch("httpx.Client", return_value=cm):
             cfg.telegram.bot_token = "TOK"
             await send_message(chat_id=99, text="test message")
         payload = http.post.call_args[1]["json"]
@@ -77,7 +77,7 @@ class TestSendMessage:
     async def test_raises_telegram_error_on_4xx(self):
         cm, _ = _http_mock(400, {"description": "chat not found"})
         with patch("notifications.telegram.config_manager") as cfg, \
-             patch("httpx.AsyncClient", return_value=cm):
+             patch("httpx.Client", return_value=cm):
             cfg.telegram.bot_token = "TOK"
             with pytest.raises(TelegramError) as exc_info:
                 await send_message(chat_id=99, text="hi")
@@ -87,7 +87,7 @@ class TestSendMessage:
     async def test_raises_telegram_error_on_5xx(self):
         cm, _ = _http_mock(500, {"description": "Internal Server Error"})
         with patch("notifications.telegram.config_manager") as cfg, \
-             patch("httpx.AsyncClient", return_value=cm):
+             patch("httpx.Client", return_value=cm):
             cfg.telegram.bot_token = "TOK"
             with pytest.raises(TelegramError) as exc_info:
                 await send_message(chat_id=99, text="hi")

@@ -1,6 +1,6 @@
 import { Outlet } from "react-router-dom"
 import { ChildrenProvider } from "../../context/ChildrenContext"
-import { useTheme } from "../../context/useTheme"
+import { useTheme } from "../../context/ThemeContext"
 import AppSidebar from "../../components/app/AppSidebar"
 import "./AppShell.css"
 

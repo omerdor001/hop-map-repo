@@ -5,9 +5,9 @@ Responsibilities are split across feature packages:
   auth/        — parent registration, login, JWT, session management
   children/    — child registration and management
   classify/    — LLM content classification + hop event ingestion
-  events/      — SSE streaming + event history
+  events/      — confirmed hop event history (REST API)
   words/       — blocked-words filter management
-  notifications/ — parent notification inbox
+  notifications/ — Telegram hop alerts
   platforms/   — platform→process mappings served to agents
   core/        — shared database pool, validators
 """
@@ -19,7 +19,6 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -39,14 +38,12 @@ from classify.router import router as classify_router
 from events.router import router as events_router
 from health.router import record_startup, router as health_router
 from profile.router import router as profile_router
-from notifications.router import router as notifications_router
 from platforms.router import router as platforms_router
 from telegram.router import router as telegram_router
 from words.router import router as words_router
 
 # Services that need lifecycle management
 from classify import service as classify_service
-from events import service as event_service
 from words import service as words_service
 from platforms import service as platforms_service
 
@@ -54,7 +51,6 @@ from platforms import service as platforms_service
 from auth.repository import initialize_indexes as auth_indexes
 from children.repository import initialize_indexes as children_indexes
 from events.repository import initialize_indexes as events_indexes
-from notifications.repository import initialize_indexes as notifications_indexes
 from words.repository import initialize_indexes as words_indexes
 from telegram.repository import initialize_indexes as telegram_indexes
 
@@ -160,17 +156,21 @@ async def lifespan(app: FastAPI):
         api_key=config_manager.llm.api_key.get_secret_value(),
     ))
 
-    # Ensure MongoDB indexes exist
-    auth_indexes()
-    children_indexes()
-    events_indexes()
-    notifications_indexes()
-    words_indexes()
-    telegram_indexes()
+    # Ensure MongoDB indexes exist — skip gracefully if DB is unavailable at
+    # startup (e.g. cold start before Atlas wakes up).  The circuit breaker
+    # will return 503 on any DB-dependent request until connectivity recovers.
+    try:
+        auth_indexes()
+        children_indexes()
+        events_indexes()
+        words_indexes()
+        telegram_indexes()
+        # Seed + load blocked words (DB-dependent — must stay inside the try block)
+        words_service.seed_if_empty(config_manager.data.words_db_path)
+    except RuntimeError as e:
+        log.warning("MongoDB index initialization skipped: %s", e)
 
-    # Seed + load blocked words, start background refresh
-    words_service.seed_if_empty(config_manager.data.words_db_path)
-    words_service.load_blocked_words()
+    words_service.load_blocked_words()  # already catches all exceptions internally
     await words_service.start_refresh_task()
 
     # Start background sweep that evicts stale per-child rate-limit entries
@@ -185,7 +185,6 @@ async def lifespan(app: FastAPI):
     log.info("HopMap server shutting down.")
     await classify_service.stop_sweep_task()
     await words_service.stop_refresh_task()
-    await event_service.shutdown_all()
 
 
 app = FastAPI(title="HopMap API", version=APP_VERSION, lifespan=lifespan)
@@ -197,9 +196,14 @@ app.add_exception_handler(RateLimitExceeded, _on_rate_limit_exceeded)
 # Starlette wraps middleware in reverse-insertion order — CORS runs first.
 # Rate-limited responses carry CORS headers so browsers can read the 429 body.
 app.add_middleware(SlowAPIMiddleware)
+# allow_credentials=True is incompatible with allow_origins=["*"] (browsers reject it).
+# Only enable credentials when explicit origins are configured.
+_cors_origins = config_manager.network.cors_origins
+_allow_credentials = _cors_origins != ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config_manager.network.cors_origins,
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -210,13 +214,13 @@ app.include_router(children_router)
 app.include_router(classify_router)
 app.include_router(events_router)
 app.include_router(profile_router)
-app.include_router(notifications_router)
 app.include_router(platforms_router)
 app.include_router(words_router)
 app.include_router(telegram_router)
 
 
 if __name__ == "__main__":
+    import uvicorn
     log.info(
         "Starting HopMap server on %s:%d",
         config_manager.network.host,

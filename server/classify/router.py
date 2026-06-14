@@ -1,4 +1,3 @@
-import asyncio
 import io
 import logging
 import pathlib
@@ -6,12 +5,13 @@ import secrets
 import zipfile
 from datetime import datetime, timedelta, timezone
 
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
 from auth.dependencies import get_agent_child, get_current_user
 from auth.security import hash_token
-from agent_installer.generator import AGENT_FILES, SETUP_CODE_TTL_HOURS, build_installer, build_readme, build_uninstaller
+from agent_installer.generator import AGENT_FILES, SETUP_CODE_TTL_HOURS, build_installer, build_launcher, build_readme, build_uninstaller
 from children.repository import (
     get_child_by_id,
     get_child_by_setup_code_hash,
@@ -37,8 +37,6 @@ from classify.schemas import (
 from core.schemas import OkResponse
 from core.validators import validate_child_id
 from events import repository as event_repo
-from events import service as event_service
-from notifications import repository as notif_repo
 from notifications import service as notification_service
 from words.service import check_blocked_words
 
@@ -46,9 +44,6 @@ log = logging.getLogger(__name__)
 
 # Root of the agent source directory, two levels up from this file (server/).
 _AGENT_DIR = pathlib.Path(__file__).parent.parent.parent / "agent"
-
-# Strong references to fire-and-forget tasks — prevents GC before completion.
-_background_tasks: set[asyncio.Task] = set()
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -112,15 +107,17 @@ def agent_installer(
         c for c in child_name if c.isalnum() or c in (" ", "_", "-")
     ).strip().replace(" ", "_") or "child"
 
-    installer  = build_installer(backend_url=backend_url.rstrip("/"), setup_code=setup_code, child_name=child_name)
+    installer   = build_installer(backend_url=backend_url.rstrip("/"), setup_code=setup_code, child_name=child_name)
     uninstaller = build_uninstaller(child_name=child_name)
     readme      = build_readme(child_name=child_name, ttl_hours=SETUP_CODE_TTL_HOURS)
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("README.txt",             readme)
-        zf.writestr("hopmap_install.ps1",    installer)
-        zf.writestr("hopmap_uninstall.ps1",  uninstaller)
+        zf.writestr("README.txt",              readme)
+        zf.writestr("hopmap_install.ps1",      installer)
+        zf.writestr("hopmap_install.bat",      build_launcher("hopmap_install.ps1"))
+        zf.writestr("hopmap_uninstall.ps1",    uninstaller)
+        zf.writestr("hopmap_uninstall.bat",    build_launcher("hopmap_uninstall.ps1"))
     buf.seek(0)
 
     return Response(
@@ -209,44 +206,35 @@ async def agent_hop(child_id: str, body: HopEventRequest, agent_child: dict = De
 
     alert_reason: str | None = "confirmed_hop" if body.detection == "confirmed_hop" else None
 
-    event = {
-        "childId": child_id, "source": "desktop",
-        "from": body.from_app, "to": body.to_app,
-        "fromTitle": body.from_title, "toTitle": body.to_title,
-        "timestamp": body.timestamp, "blocked": False,
-        "alert": alert_reason is not None, "alertReason": alert_reason,
-        "receivedAt": datetime.now(timezone.utc).isoformat(),
-        "clickConfidence": body.click_confidence,
-        "confirmedTo": body.confirmed_to, "confirmedToTitle": body.confirmed_to_title,
-        "confirmedAt": body.confirmed_at, "context": body.context,
-        "classifyConfidence": body.classify_confidence,
-        "classifyReason": body.classify_reason, "classifySource": body.classify_source,
-    }
-
     if alert_reason is not None and body.click_confidence != "switch_only":
-        event_id = event_repo.insert_event(event)
-        notif_repo.insert_notification(
+        event = {
+            "childId": child_id, "source": "desktop",
+            "from": body.from_app, "to": body.to_app,
+            "fromTitle": body.from_title, "toTitle": body.to_title,
+            "timestamp": body.timestamp, "blocked": False,
+            "alert": True, "alertReason": alert_reason,
+            "receivedAt": datetime.now(timezone.utc).isoformat(),
+            "clickConfidence": body.click_confidence,
+            "confirmedTo": body.confirmed_to, "confirmedToTitle": body.confirmed_to_title,
+            "confirmedAt": body.confirmed_at, "context": body.context,
+            "classifyConfidence": body.classify_confidence,
+            "classifyReason": body.classify_reason, "classifySource": body.classify_source,
+        }
+        event_repo.insert_event(event)
+        await notification_service.dispatch_hop(
             parent_id=agent_child["parentId"],
-            child_id=child_id,
-            event_id=event_id,
-            notif_type="hop_detected",
-            message=f"{agent_child.get('childName', child_id)} hopped to {body.confirmed_to or body.to_app}",
+            child_name=agent_child.get("childName", child_id),
+            to_app=body.confirmed_to or body.to_app,
+            from_app=body.from_app,
+            to_title=body.confirmed_to_title or body.to_title,
+            from_title=body.from_title,
+            timestamp=body.confirmed_at or body.timestamp,
+            confidence=body.classify_confidence,
         )
-        task = asyncio.create_task(
-            notification_service.dispatch_hop(
-                parent_id=agent_child["parentId"],
-                child_name=agent_child.get("childName", child_id),
-                to_app=body.confirmed_to or body.to_app,
-            ),
-            name="telegram-hop-notify",
-        )
-        _background_tasks.add(task)
-        task.add_done_callback(_background_tasks.discard)
-    await event_service.broadcast(child_id, {"type": "event", **event})
 
     log.info(
         "Hop  %r → %r  (%r → %r)  alert=%s",
-        event["from"], event["to"], event["fromTitle"], event["toTitle"],
+        body.from_app, body.to_app, body.from_title, body.to_title,
         alert_reason or "none",
     )
     return OkResponse()

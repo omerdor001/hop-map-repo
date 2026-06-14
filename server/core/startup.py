@@ -62,19 +62,15 @@ def _check_multi_worker(cfg: "ServerConfig") -> list[str]:
     """Return a violation if workers > 1 without a Redis URL.
 
     Why this is required:
-      SSE event queues (events/service.py _sse_queues) and the per-child
-      classify rate-limit counters (classify/service.py _classify_call_times)
-      are module-level dicts that live inside a single process.  With multiple
-      worker processes each worker holds its own independent copy — a hop event
-      received by worker A is broadcast only to SSE clients connected to worker
-      A; worker B's clients receive nothing.  Rate-limit counters diverge the
-      same way, effectively multiplying the allowed request budget by the
-      worker count.
+      Per-child classify rate-limit counters (classify/service.py
+      _classify_call_times) are a module-level dict that lives inside a single
+      process.  With multiple worker processes each worker holds its own
+      independent copy — counters diverge across workers, effectively
+      multiplying the allowed request budget by the worker count.
 
-      Redis solves this: slowapi can use RedisStorage for auth rate-limits
-      (one-line change via config), and SSE pub/sub can be migrated to a Redis
-      channel when the need arises.  Until then, single-worker is the only
-      safe deployment mode.
+      Redis solves this: slowapi can use RedisStorage for rate-limits via a
+      one-line config change.  Until then, single-worker is the only safe
+      deployment mode.
     """
     if cfg.network.workers <= 1:
         return []
@@ -82,10 +78,9 @@ def _check_multi_worker(cfg: "ServerConfig") -> list[str]:
         return []
     return [
         f"workers={cfg.network.workers} but {_REDIS_URL_ENV_VAR} is not set. "
-        "Multi-worker deployments require shared state for SSE event queues and "
-        "per-child classify rate-limit counters — in-process dicts diverge "
-        "silently across worker processes, causing missed SSE events and "
-        "under-enforced rate limits. "
+        "Multi-worker deployments require shared state for per-child classify "
+        "rate-limit counters — in-process dicts diverge silently across worker "
+        "processes, causing under-enforced rate limits. "
         f"Set {_REDIS_URL_ENV_VAR}=redis://host:6379 and install "
         "'limits[redis]', or set workers=1."
     ]

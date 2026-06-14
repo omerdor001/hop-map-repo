@@ -97,8 +97,8 @@ function StepForm({ onSuccess, onCancel }) {
 // ─── Step 2: Installer download ──────────────────────────────────────────────
 
 const INSTALL_STEPS = [
-  { n: 1, text: "Download the ZIP below and copy it to the child's PC (USB, shared folder, etc.)." },
-  { n: 2, text: 'Right-click "hopmap_install.ps1" and choose "Run with PowerShell". Click Yes when Windows asks for admin permission.' },
+  { n: 1, text: "Download the ZIP below and extract it to the child's PC (USB, shared folder, etc.)." },
+  { n: 2, text: 'Double-click "hopmap_install.bat" and click Yes when Windows asks for admin permission.' },
   { n: 3, text: "The installer sets everything up and starts the agent immediately - no further steps needed." },
 ]
 

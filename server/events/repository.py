@@ -1,32 +1,29 @@
-from pymongo import DESCENDING
+from __future__ import annotations
 
-from core.database import pool
 from config import config_manager
-
-
-def _col_events():
-    return pool.get_collection(config_manager.db.events_collection)
+from core.database import pool
 
 
 def insert_event(doc: dict) -> str:
-    result = _col_events().insert_one({**doc})  # copy prevents PyMongo from mutating caller's dict with _id
+    col = pool.get_collection(config_manager.db.events_collection)
+    result = col.insert_one(doc)
     return str(result.inserted_id)
 
 
 def get_events(child_id: str, limit: int = 0) -> list[dict]:
-    cursor = (
-        _col_events()
-        .find({"childId": child_id}, {"_id": 0})
-        .sort("timestamp", DESCENDING)
-        .limit(limit)
-    )
+    col = pool.get_collection(config_manager.db.events_collection)
+    cursor = col.find({"childId": child_id}, {"_id": 0}).sort("timestamp", -1)
+    if limit > 0:
+        cursor = cursor.limit(limit)
     return list(cursor)
 
 
 def clear_events(child_id: str) -> int:
-    result = _col_events().delete_many({"childId": child_id})
+    col = pool.get_collection(config_manager.db.events_collection)
+    result = col.delete_many({"childId": child_id})
     return result.deleted_count
 
 
 def initialize_indexes() -> None:
-    _col_events().create_index([("childId", 1), ("timestamp", DESCENDING)])
+    col = pool.get_collection(config_manager.db.events_collection)
+    col.create_index([("childId", 1), ("timestamp", -1)])

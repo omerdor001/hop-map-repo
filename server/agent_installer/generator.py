@@ -24,6 +24,15 @@ SETUP_CODE_TTL_HOURS = 1
 _INSTALL_DIR = "C:\\HopMap"
 
 
+def build_launcher(script_name: str) -> str:
+    """Return a .bat file that unblocks and runs a .ps1 with elevation + bypass."""
+    return f"""\
+@echo off
+powershell -NoProfile -Command "Unblock-File -Path '%~dp0{script_name}'"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0{script_name}"
+"""
+
+
 def build_uninstaller(*, child_name: str) -> str:
     """Return a PowerShell uninstaller script that cleanly removes the agent."""
     safe_name = "".join(c for c in child_name if c.isalnum() or c == " ").strip() or "child"
@@ -103,23 +112,25 @@ HopMap Agent Setup - {safe_name}
 
 FILES IN THIS PACKAGE
 ---------------------
-  hopmap_install.ps1    Run this ONCE on {safe_name}'s PC to install the HopMap agent.
-  hopmap_uninstall.ps1  Run this to completely remove the agent from the PC.
+  hopmap_install.bat    Double-click this to install the HopMap agent.
+  hopmap_uninstall.bat  Double-click this to remove the agent.
+  hopmap_install.ps1    Advanced users only — run via hopmap_install.bat instead.
+  hopmap_uninstall.ps1  Advanced users only — run via hopmap_uninstall.bat instead.
   README.txt            This file.
 
 
 HOW TO INSTALL
 --------------
-1. Copy this folder to {safe_name}'s PC (USB drive, shared folder, etc.)
-2. Right-click "hopmap_install.ps1" and choose "Run with PowerShell"
+1. Extract this ZIP and copy the folder to {safe_name}'s PC (USB drive, shared folder, etc.)
+2. Double-click "hopmap_install.bat"
 3. Click "Yes" when Windows asks for administrator permission
-4. The script installs everything automatically and starts the agent immediately
+4. The installer sets everything up and starts the agent immediately
 5. The agent will also start automatically every time {safe_name} logs in
 
 
 HOW TO UNINSTALL
 ----------------
-1. Right-click "hopmap_uninstall.ps1" and choose "Run with PowerShell"
+1. Double-click "hopmap_uninstall.bat"
 2. Click "Yes" when Windows asks for administrator permission
 3. The agent, scheduled task, and all files will be removed
 

@@ -35,10 +35,11 @@ Detection pipeline
   Layer 5 — When the server flags a hop attempt the lure is
              parked in a per-URL pending store.  On the next app-switch away
              from the game the store is drained and each lure is confirmed with
-             one of three click-confidence tiers:
-               • app_match   — the native desktop app for the lure platform opened
-               • title_match — a browser navigated to the lure domain (title poll)
-               • switch_only — an app switch occurred but no stronger signal
+             one of four click-confidence tiers:
+               • app_match      — the native desktop app for the lure platform opened
+               • title_match    — a browser's title matched the lure domain (title poll)
+               • browser_switch — a browser opened but title didn't confirm domain in time
+               • switch_only    — an app switch occurred but no stronger signal
 
 Required packages (pip install):
     pywin32  psutil  requests  python-dotenv  mss  pytesseract  Pillow
